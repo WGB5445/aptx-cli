@@ -11,6 +11,9 @@ importers:
       '@aptos-labs/ts-sdk':
         specifier: ^6.1.0
         version: 6.1.0(got@11.8.6)
+      '@noble/hashes':
+        specifier: ^1.8.0
+        version: 1.8.0
     devDependencies:
       '@types/node':
         specifier: ^24.3.0
