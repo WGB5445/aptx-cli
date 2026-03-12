@@ -14,13 +14,31 @@ struct State {
     artifacts_dir: Option<String>,
     network: Option<String>,
     function: Option<String>,
+    script_hex: Option<String>,
     args: Vec<String>,
     type_args: Vec<String>,
+    secondary_signer_addresses: Vec<String>,
+    secondary_private_keys: Vec<String>,
+    secondary_public_keys: Vec<String>,
     sender_address: Option<String>,
     private_key: Option<String>,
     private_key_env: Option<String>,
     private_key_file: Option<String>,
+    public_key: Option<String>,
+    public_key_env: Option<String>,
+    public_key_file: Option<String>,
     profile: Option<String>,
+    hash: Option<String>,
+    fullnode: Option<String>,
+    multisig_action: Option<String>,
+    multisig_address: Option<String>,
+    multisig_owner_addresses: Vec<String>,
+    multisig_threshold: Option<u64>,
+    multisig_sequence: Option<u64>,
+    multisig_hash_only: bool,
+    multi_key_public_keys: Vec<String>,
+    multi_key_signers: Vec<String>,
+    multi_key_threshold: Option<u64>,
     no_sign: bool,
     abi_enabled: bool,
     verbose: bool,
@@ -32,9 +50,22 @@ struct State {
 struct InputSpec {
     network: String,
     function: String,
+    script_hex: String,
     sender_address: String,
     args: Vec<String>,
     type_args: Vec<String>,
+    secondary_signer_addresses: Vec<String>,
+    hash: String,
+    fullnode: String,
+    multisig_action: String,
+    multisig_address: String,
+    multisig_owner_addresses: Vec<String>,
+    multisig_threshold: u64,
+    multisig_sequence: u64,
+    multisig_hash_only: bool,
+    multi_key_public_keys: Vec<String>,
+    multi_key_signers: Vec<String>,
+    multi_key_threshold: u64,
     abi_enabled: bool,
     no_sign: bool,
 }
@@ -69,6 +100,10 @@ fn run(argv: Vec<String>) -> Result<(), String> {
             .function
             .clone()
             .unwrap_or_else(|| get_string(&file_input, "function", "")),
+        script_hex: state
+            .script_hex
+            .clone()
+            .unwrap_or_else(|| get_string(&file_input, "script_hex", "")),
         sender_address: state
             .sender_address
             .clone()
@@ -83,12 +118,110 @@ fn run(argv: Vec<String>) -> Result<(), String> {
         } else {
             state.type_args.clone()
         },
+        secondary_signer_addresses: if state.secondary_signer_addresses.is_empty() {
+            get_string_list(&file_input, "secondary_signer_addresses")
+        } else {
+            state.secondary_signer_addresses.clone()
+        },
+        hash: state
+            .hash
+            .clone()
+            .unwrap_or_else(|| get_string(&file_input, "hash", "")),
+        fullnode: state
+            .fullnode
+            .clone()
+            .unwrap_or_else(|| get_string(&file_input, "fullnode", "")),
+        multisig_action: state
+            .multisig_action
+            .clone()
+            .unwrap_or_else(|| get_string(&file_input, "multisig_action", "")),
+        multisig_address: state
+            .multisig_address
+            .clone()
+            .unwrap_or_else(|| get_string(&file_input, "multisig_address", "")),
+        multisig_owner_addresses: if state.multisig_owner_addresses.is_empty() {
+            get_string_list(&file_input, "multisig_owner_addresses")
+        } else {
+            state.multisig_owner_addresses.clone()
+        },
+        multisig_threshold: state
+            .multisig_threshold
+            .unwrap_or_else(|| get_u64(&file_input, "multisig_threshold", 0)),
+        multisig_sequence: state
+            .multisig_sequence
+            .unwrap_or_else(|| get_u64(&file_input, "multisig_sequence", 0)),
+        multisig_hash_only: state.multisig_hash_only || get_bool(&file_input, "multisig_hash_only", false),
+        multi_key_public_keys: if state.multi_key_public_keys.is_empty() {
+            get_string_list(&file_input, "multi_key_public_keys")
+        } else {
+            state.multi_key_public_keys.clone()
+        },
+        multi_key_signers: if state.multi_key_signers.is_empty() {
+            get_string_list(&file_input, "multi_key_signers")
+        } else {
+            state.multi_key_signers.clone()
+        },
+        multi_key_threshold: state
+            .multi_key_threshold
+            .unwrap_or_else(|| get_u64(&file_input, "multi_key_threshold", 0)),
         abi_enabled: state.abi_enabled && get_bool(&file_input, "abi_enabled", true),
         no_sign: state.no_sign || get_bool(&file_input, "no_sign", false),
     };
 
-    if spec.function.is_empty() {
+    if state.action != "inspect" && spec.function.is_empty() && spec.script_hex.is_empty() && state.txn_type != "multi-sig" {
         return Err("missing function".to_string());
+    }
+    if state.txn_type != "single"
+        && state.txn_type != "multi-agent"
+        && state.txn_type != "multi-key"
+        && state.txn_type != "multi-sig"
+    {
+        return Err(format!("unsupported txn type: {}", state.txn_type));
+    }
+    if state.txn_type == "multi-agent" && spec.secondary_signer_addresses.is_empty() {
+        return Err("multi-agent requires --secondary-signer-address".to_string());
+    }
+    if state.txn_type == "multi-key" {
+        if spec.multi_key_threshold < 1 {
+            return Err("multi-key requires --multi-key-threshold >= 1".to_string());
+        }
+        if spec.multi_key_threshold as usize > spec.multi_key_public_keys.len() {
+            return Err("multi-key threshold cannot exceed public key count".to_string());
+        }
+    }
+    if state.txn_type == "multi-sig" {
+        match spec.multisig_action.as_str() {
+            "create-account" => {
+                if spec.multisig_threshold < 1 {
+                    return Err("multi-sig create-account requires --multisig-threshold >= 1".to_string());
+                }
+                if spec.multisig_owner_addresses.is_empty() {
+                    return Err("multi-sig create-account requires --multisig-owner-address".to_string());
+                }
+            }
+            "propose" => {
+                if spec.multisig_address.is_empty() {
+                    return Err("multi-sig propose requires --multisig-address".to_string());
+                }
+                if spec.function.is_empty() {
+                    return Err("multi-sig propose requires --function".to_string());
+                }
+            }
+            "approve" => {
+                if spec.multisig_address.is_empty() {
+                    return Err("multi-sig approve requires --multisig-address".to_string());
+                }
+                if spec.multisig_sequence < 1 {
+                    return Err("multi-sig approve requires --multisig-sequence".to_string());
+                }
+            }
+            "execute" => {
+                if spec.multisig_address.is_empty() {
+                    return Err("multi-sig execute requires --multisig-address".to_string());
+                }
+            }
+            _ => return Err("multi-sig requires --multisig-action".to_string()),
+        }
     }
     if !spec.abi_enabled {
         for arg in &spec.args {
@@ -145,13 +278,16 @@ fn run(argv: Vec<String>) -> Result<(), String> {
 }
 
 fn parse_cli(argv: &[String]) -> Result<State, String> {
-    if argv.len() < 2 {
+    if argv.is_empty() {
         return Err("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]".to_string());
     }
     let action = argv[0].clone();
     let (txn_type, start) = if action == "inspect" {
         ("single".to_string(), 1)
     } else {
+        if argv.len() < 2 {
+            return Err("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]".to_string());
+        }
         (argv[1].clone(), 2)
     };
     let mut state = State {
@@ -164,13 +300,31 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
         artifacts_dir: None,
         network: None,
         function: None,
+        script_hex: None,
         args: Vec::new(),
         type_args: Vec::new(),
+        secondary_signer_addresses: Vec::new(),
+        secondary_private_keys: Vec::new(),
+        secondary_public_keys: Vec::new(),
         sender_address: None,
         private_key: None,
         private_key_env: None,
         private_key_file: None,
+        public_key: None,
+        public_key_env: None,
+        public_key_file: None,
         profile: None,
+        hash: None,
+        fullnode: None,
+        multisig_action: None,
+        multisig_address: None,
+        multisig_owner_addresses: Vec::new(),
+        multisig_threshold: None,
+        multisig_sequence: None,
+        multisig_hash_only: false,
+        multi_key_public_keys: Vec::new(),
+        multi_key_signers: Vec::new(),
+        multi_key_threshold: None,
         no_sign: false,
         abi_enabled: true,
         verbose: false,
@@ -211,6 +365,10 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
                 state.function = next;
                 i += 2;
             }
+            "--script-hex" => {
+                state.script_hex = next;
+                i += 2;
+            }
             "--arg" => {
                 state.args.push(next.ok_or_else(|| "missing value for --arg".to_string())?);
                 i += 2;
@@ -219,6 +377,24 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
                 state
                     .type_args
                     .push(next.ok_or_else(|| "missing value for --type-arg".to_string())?);
+                i += 2;
+            }
+            "--secondary-signer-address" => {
+                state
+                    .secondary_signer_addresses
+                    .push(next.ok_or_else(|| "missing value for --secondary-signer-address".to_string())?);
+                i += 2;
+            }
+            "--secondary-private-key" => {
+                state
+                    .secondary_private_keys
+                    .push(next.ok_or_else(|| "missing value for --secondary-private-key".to_string())?);
+                i += 2;
+            }
+            "--secondary-public-key" => {
+                state
+                    .secondary_public_keys
+                    .push(next.ok_or_else(|| "missing value for --secondary-public-key".to_string())?);
                 i += 2;
             }
             "--sender-address" => {
@@ -237,8 +413,82 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
                 state.private_key_file = next;
                 i += 2;
             }
+            "--public-key" => {
+                state.public_key = next;
+                i += 2;
+            }
+            "--public-key-env" => {
+                state.public_key_env = next;
+                i += 2;
+            }
+            "--public-key-file" => {
+                state.public_key_file = next;
+                i += 2;
+            }
             "--profile" => {
                 state.profile = next;
+                i += 2;
+            }
+            "--hash" => {
+                state.hash = next;
+                i += 2;
+            }
+            "--fullnode" => {
+                state.fullnode = next;
+                i += 2;
+            }
+            "--multisig-action" => {
+                state.multisig_action = next;
+                i += 2;
+            }
+            "--multisig-address" => {
+                state.multisig_address = next;
+                i += 2;
+            }
+            "--multisig-owner-address" => {
+                state
+                    .multisig_owner_addresses
+                    .push(next.ok_or_else(|| "missing value for --multisig-owner-address".to_string())?);
+                i += 2;
+            }
+            "--multisig-threshold" => {
+                let value = next.ok_or_else(|| "missing value for --multisig-threshold".to_string())?;
+                let parsed = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid --multisig-threshold: {value}"))?;
+                state.multisig_threshold = Some(parsed);
+                i += 2;
+            }
+            "--multisig-sequence" => {
+                let value = next.ok_or_else(|| "missing value for --multisig-sequence".to_string())?;
+                let parsed = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid --multisig-sequence: {value}"))?;
+                state.multisig_sequence = Some(parsed);
+                i += 2;
+            }
+            "--multisig-hash-only" => {
+                state.multisig_hash_only = true;
+                i += 1;
+            }
+            "--multi-key-public-key" => {
+                state
+                    .multi_key_public_keys
+                    .push(next.ok_or_else(|| "missing value for --multi-key-public-key".to_string())?);
+                i += 2;
+            }
+            "--multi-key-signer" => {
+                state
+                    .multi_key_signers
+                    .push(next.ok_or_else(|| "missing value for --multi-key-signer".to_string())?);
+                i += 2;
+            }
+            "--multi-key-threshold" => {
+                let value = next.ok_or_else(|| "missing value for --multi-key-threshold".to_string())?;
+                let parsed = value
+                    .parse::<u64>()
+                    .map_err(|_| format!("invalid --multi-key-threshold: {value}"))?;
+                state.multi_key_threshold = Some(parsed);
                 i += 2;
             }
             "--sdk-mode" => {
@@ -343,12 +593,24 @@ fn parse_simple_json(text: &str) -> Result<BTreeMap<String, DataValue>, String> 
             map.insert(key.to_string(), DataValue::String(value));
         }
     }
+    for key in ["script_hex", "hash", "fullnode", "multisig_action", "multisig_address"] {
+        if let Some(value) = extract_json_string(text, key) {
+            map.insert(key.to_string(), DataValue::String(value));
+        }
+    }
     for key in ["abi_enabled", "no_sign"] {
         if let Some(value) = extract_json_bool(text, key) {
             map.insert(key.to_string(), DataValue::Bool(value));
         }
     }
-    for key in ["args", "type_args"] {
+    for key in [
+        "args",
+        "type_args",
+        "secondary_signer_addresses",
+        "multisig_owner_addresses",
+        "multi_key_public_keys",
+        "multi_key_signers",
+    ] {
         if let Some(values) = extract_json_string_array(text, key) {
             map.insert(key.to_string(), DataValue::List(values));
         }
@@ -425,6 +687,13 @@ fn get_string_list(map: &BTreeMap<String, DataValue>, key: &str) -> Vec<String> 
     match map.get(key) {
         Some(DataValue::List(values)) => values.clone(),
         _ => Vec::new(),
+    }
+}
+
+fn get_u64(map: &BTreeMap<String, DataValue>, key: &str, fallback: u64) -> u64 {
+    match map.get(key) {
+        Some(DataValue::String(value)) => value.parse::<u64>().unwrap_or(fallback),
+        _ => fallback,
     }
 }
 
