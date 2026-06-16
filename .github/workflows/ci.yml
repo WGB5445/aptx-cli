@@ -40,6 +40,10 @@ jobs:
         working-directory: implementations/typescript
         run: pnpm install --frozen-lockfile
 
+      - name: Install Python implementation
+        working-directory: implementations/python
+        run: pip install -e .
+
       - name: Install conformance dependencies
         run: pip install pyyaml
 

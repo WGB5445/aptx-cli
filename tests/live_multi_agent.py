@@ -109,12 +109,13 @@ def wait_for_transaction(tx_hash: str, timeout_secs: int = 60) -> None:
     raise RuntimeError(f"timed out waiting for transaction {tx_hash}: {last_error}")
 
 
-def fund_account(address: str, amount: int = 100000000) -> None:
+def fund_account(address: str, amount: int = 1_000_000_000) -> None:
     response = http_json(f"{faucet_url()}/fund", method="POST", body={"address": address, "amount": amount})
     txn_hashes = response.get("txn_hashes") or []
     if not txn_hashes:
         raise RuntimeError(f"faucet response missing txn_hashes: {response}")
-    wait_for_transaction(txn_hashes[0])
+    for tx_hash in txn_hashes:
+        wait_for_transaction(tx_hash)
 
 
 def provision_accounts() -> dict:
