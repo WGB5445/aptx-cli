@@ -224,7 +224,7 @@ func assertBalance(t *testing.T, client *aptos.Client, address aptos.AccountAddr
 
 func submitAndWait(t *testing.T, client *aptos.Client, sender *aptos.Account, payload aptos.TransactionPayloadImpl) *api.UserTransaction {
 	t.Helper()
-	submitResponse, err := client.BuildSignAndSubmitTransaction(sender, aptos.TransactionPayload{Payload: payload})
+	submitResponse, err := client.BuildSignAndSubmitTransaction(sender, aptos.TransactionPayload{Payload: payload}, aptos.MaxGasAmount(200_000))
 	if err != nil {
 		t.Fatalf("submit transaction: %v", err)
 	}
