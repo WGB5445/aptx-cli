@@ -1129,18 +1129,24 @@ async function runReal(state: CliState, spec: InputSpec): Promise<Record<string,
       ? await buildMultisigPayload(aptos, spec, parsedArgs, typeArgs)
       : { payload: buildSimplePayload(spec, parsedArgs, typeArgs) };
   const payloadInstance = payloadPlan.payload;
-  const transaction = await buildTransaction({
-    aptosConfig: aptos.config,
-    sender: spec.sender_address,
-    payload: payloadInstance,
-    options: {
-      maxGasAmount: state.maxGasAmount != null ? BigInt(state.maxGasAmount) : 200_000n,
-      ...(state.gasUnitPrice != null ? { gasUnitPrice: BigInt(state.gasUnitPrice) } : {}),
-    },
-    ...(state.txnType === "multi-agent"
-      ? { secondarySignerAddresses: spec.secondary_signer_addresses }
-      : {}),
-  });
+  const txnOptions = {
+    maxGasAmount: state.maxGasAmount ?? 200_000,
+    ...(state.gasUnitPrice != null ? { gasUnitPrice: state.gasUnitPrice } : {}),
+  };
+  const transaction = await (state.txnType === "multi-agent"
+    ? buildTransaction({
+        aptosConfig: aptos.config,
+        sender: spec.sender_address,
+        payload: payloadInstance,
+        options: txnOptions,
+        secondarySignerAddresses: spec.secondary_signer_addresses,
+      })
+    : buildTransaction({
+        aptosConfig: aptos.config,
+        sender: spec.sender_address,
+        payload: payloadInstance,
+        options: txnOptions,
+      }));
 
   const payload: Record<string, unknown> = {
     cli: "aptx",
