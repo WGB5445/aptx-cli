@@ -1133,6 +1133,10 @@ async function runReal(state: CliState, spec: InputSpec): Promise<Record<string,
     aptosConfig: aptos.config,
     sender: spec.sender_address,
     payload: payloadInstance,
+    options: {
+      maxGasAmount: state.maxGasAmount != null ? BigInt(state.maxGasAmount) : 200_000n,
+      ...(state.gasUnitPrice != null ? { gasUnitPrice: BigInt(state.gasUnitPrice) } : {}),
+    },
     ...(state.txnType === "multi-agent"
       ? { secondarySignerAddresses: spec.secondary_signer_addresses }
       : {}),
