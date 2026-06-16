@@ -38,7 +38,29 @@ Run shared mock conformance across all implementations:
 python3 conformance/run.py
 ```
 
-Run a specific implementation:
+### Offline transaction building (no network needed)
+
+All 4 SDKs support `encode`, `decode`, and `sign` without any network connection:
+
+```bash
+# Build a raw transaction → BCS hex (identical output across all 4 SDKs)
+node --experimental-strip-types implementations/typescript/src/cli.ts encode single \
+  --function 0x1::aptos_account::transfer \
+  --sender-address 0x1111111111111111111111111111111111111111111111111111111111111111 \
+  --arg address:0x2222222222222222222222222222222222222222222222222222222222222222 \
+  --arg u64:1000 \
+  --sequence-number 0 --chain-id 1 --output-format json
+
+# Sign the BCS hex with an Ed25519 private key (deterministic across all 4 SDKs)
+node --experimental-strip-types implementations/typescript/src/cli.ts sign \
+  --input-bcs 0x... --private-key 0x... --output-format json
+
+# Decode BCS hex back to human-readable fields
+node --experimental-strip-types implementations/typescript/src/cli.ts decode \
+  --input-bcs 0x... --output-format json
+```
+
+### Simulate (requires network / mock mode)
 
 ```bash
 # TypeScript (Node)
@@ -104,13 +126,16 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 
 ## Current Status
 
-| Implementation | SDK | Real coverage |
-|---|---|---|
-| TypeScript | `@aptos-labs/ts-sdk` ^6.1.0 | single, multi-agent, multi-key, multi-sig |
-| Go | `aptos-go-sdk` v1.12.0 | single, multi-agent, multi-sig (multi-key pending) |
-| Python | `aptos-python-sdk` | mock only |
-| Rust | `aptos-rust-sdk` | mock only |
+| Implementation | SDK | Offline (encode/decode/sign) | Simulate coverage |
+|---|---|---|---|
+| TypeScript | `@aptos-labs/ts-sdk` ^7.1.0 | ✅ | single, multi-agent, multi-key, multi-sig |
+| Go | `aptos-go-sdk` v1.13.0 | ✅ | single, multi-agent, multi-sig (multi-key pending) |
+| Python | `aptos-sdk` >=0.11.0 | ✅ | mock only (no orderless support) |
+| Rust | `aptos-sdk` 0.5.0 | ✅ | mock only |
 
+- **BCS encoding is bit-identical across all 4 SDKs** — same inputs → same bytes, proven by `conformance/cases/encode-single.yaml`
+- **Ed25519 signatures are deterministic and identical** across all 4 SDKs — proven by `conformance/cases/sign-single-ed25519.yaml`
+- Canonical BCS test vector: [`fixtures/bcs/single-transfer-raw.hex`](fixtures/bcs/single-transfer-raw.hex)
 - CI runs two jobs: **conformance** (mock, all languages) and **localnet-live** (real TypeScript + Go tests)
 - the TypeScript `pnpm start:deno` entrypoint falls back to `$HOME/.deno/bin/deno` when `deno` is not on `PATH`
 - `multi-agent` supports both entry-function (`--function`) and script payload (`--script-hex`)
