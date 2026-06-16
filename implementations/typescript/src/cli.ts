@@ -29,10 +29,13 @@ import {
   buildTransaction,
   isUserTransactionResponse,
   parseTypeTag,
+  RawTransaction,
+  ChainId,
+  Deserializer,
 } from "@aptos-labs/ts-sdk";
 import type { EntryFunctionArgument } from "@aptos-labs/ts-sdk";
 
-type Action = "simulate" | "submit" | "run" | "inspect";
+type Action = "simulate" | "submit" | "run" | "inspect" | "encode" | "decode" | "sign";
 type TxnType = "single" | "multi-agent" | "multi-key" | "multi-sig";
 type OutputFormat = "json" | "yaml" | "table" | "ascii";
 type MultisigAction = "create-account" | "propose" | "approve" | "execute";
@@ -105,6 +108,14 @@ type CliState = {
   verbose: boolean;
   quiet: boolean;
   sdkMode: "mock" | "sdk";
+  sequenceNumber?: number;
+  chainId?: number;
+  maxGasAmount?: number;
+  gasUnitPrice?: number;
+  expirationTimestamp?: number;
+  nonce?: string;
+  inputBcs?: string;
+  feePayerAddress?: string;
 };
 
 type AbiSummary = {
@@ -128,8 +139,8 @@ function parseArgList(argv: string[]): CliState {
     fail("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]");
   }
   const action = argv[0] as Action;
-  const txnType = (action === "inspect" ? "single" : argv[1]) as TxnType;
-  const start = action === "inspect" ? 1 : 2;
+  const txnType = (action === "inspect" || action === "decode" || action === "sign" ? "single" : argv[1]) as TxnType;
+  const start = (action === "inspect" || action === "decode" || action === "sign") ? 1 : 2;
   const state: CliState = {
     action,
     txnType,
@@ -284,6 +295,38 @@ function parseArgList(argv: string[]): CliState {
         state.sdkMode = (next as "mock" | "sdk") || "sdk";
         i += 1;
         break;
+      case "--sequence-number":
+        state.sequenceNumber = Number(next);
+        i += 1;
+        break;
+      case "--chain-id":
+        state.chainId = Number(next);
+        i += 1;
+        break;
+      case "--max-gas-amount":
+        state.maxGasAmount = Number(next);
+        i += 1;
+        break;
+      case "--gas-unit-price":
+        state.gasUnitPrice = Number(next);
+        i += 1;
+        break;
+      case "--expiration-timestamp":
+        state.expirationTimestamp = Number(next);
+        i += 1;
+        break;
+      case "--nonce":
+        state.nonce = next;
+        i += 1;
+        break;
+      case "--input-bcs":
+        state.inputBcs = next;
+        i += 1;
+        break;
+      case "--fee-payer-address":
+        state.feePayerAddress = next;
+        i += 1;
+        break;
       case "--no-sign":
         state.noSign = true;
         break;
@@ -382,6 +425,9 @@ function signingMode(state: CliState): string {
 }
 
 function requireValidState(state: CliState, spec: InputSpec): void {
+  if (state.action === "encode" || state.action === "decode" || state.action === "sign") {
+    return;
+  }
   if (state.action === "inspect") {
     return;
   }
@@ -1243,6 +1289,109 @@ async function runReal(state: CliState, spec: InputSpec): Promise<Record<string,
   return payload;
 }
 
+async function runEncode(state: CliState, spec: InputSpec): Promise<Record<string, unknown>> {
+  const seqNum = BigInt(state.sequenceNumber ?? 0);
+  const chainIdVal = state.chainId ?? 4;
+  const maxGas = BigInt(state.maxGasAmount ?? 200_000);
+  const gasPrice = BigInt(state.gasUnitPrice ?? 100);
+  const expiration = BigInt(state.expirationTimestamp ?? 9_999_999_999);
+  const sender = AccountAddress.fromString(spec.sender_address);
+  const chainId = new ChainId(chainIdVal);
+
+  const parsedArgs = spec.args.map(parseArg);
+  const typeArgs = spec.type_args.map((v) => parseTypeTag(v));
+  const payload = buildSimplePayload(spec, parsedArgs, typeArgs);
+
+  const rawTxn = new RawTransaction(sender, seqNum, payload, maxGas, gasPrice, expiration, chainId);
+
+  return {
+    action: "encode",
+    txn_type: state.txnType,
+    bcs: "0x" + Buffer.from(rawTxn.bcsToBytes()).toString("hex"),
+    sender: spec.sender_address,
+    function: spec.function,
+    chain_id: chainIdVal,
+    sequence_number: Number(seqNum),
+    max_gas_amount: Number(maxGas),
+    gas_unit_price: Number(gasPrice),
+    expiration_timestamp: Number(expiration),
+  };
+}
+
+async function runDecode(state: CliState): Promise<Record<string, unknown>> {
+  if (!state.inputBcs) fail("decode requires --input-bcs <hex>");
+  const hexStr = state.inputBcs.startsWith("0x") ? state.inputBcs.slice(2) : state.inputBcs;
+  const bytes = Uint8Array.from(Buffer.from(hexStr, "hex"));
+  const des = new Deserializer(bytes);
+  const rawTxn = RawTransaction.deserialize(des);
+
+  const MAX_U64 = 18446744073709551615n;
+  const isOrderless = rawTxn.sequence_number === MAX_U64;
+
+  let fn = "";
+  try {
+    // TransactionPayloadEntryFunction.entryFunction gives EntryFunction.
+    // EntryFunction extends Serializable so .toString() returns BCS hex — must use .identifier property.
+    const p = rawTxn.payload as {
+      entryFunction?: {
+        module_name?: { address?: { toString(): string }; name?: { identifier?: string } };
+        function_name?: { identifier?: string };
+      };
+    };
+    const ef = p.entryFunction;
+    if (ef) {
+      const addr = ef.module_name?.address?.toString() ?? "";
+      const mod = ef.module_name?.name?.identifier ?? "";
+      const fname = ef.function_name?.identifier ?? "";
+      fn = `${addr}::${mod}::${fname}`;
+    }
+  } catch {
+    fn = "";
+  }
+
+  return {
+    action: "decode",
+    txn_type: isOrderless ? "orderless" : "single",
+    sender: rawTxn.sender.toString(),
+    function: fn,
+    chain_id: rawTxn.chain_id.chainId,
+    sequence_number: isOrderless ? "max_u64" : Number(rawTxn.sequence_number),
+    max_gas_amount: Number(rawTxn.max_gas_amount),
+    gas_unit_price: Number(rawTxn.gas_unit_price),
+    expiration_timestamp: Number(rawTxn.expiration_timestamp_secs),
+    is_orderless: isOrderless,
+  };
+}
+
+async function runSign(state: CliState): Promise<Record<string, unknown>> {
+  if (!state.inputBcs) fail("sign requires --input-bcs <hex>");
+  const keyHex = readPrivateKey(state);
+  if (!keyHex) fail("sign requires --private-key <hex>");
+
+  const hexStr = state.inputBcs.startsWith("0x") ? state.inputBcs.slice(2) : state.inputBcs;
+  const bytes = Uint8Array.from(Buffer.from(hexStr, "hex"));
+  const des = new Deserializer(bytes);
+  const rawTxn = RawTransaction.deserialize(des);
+
+  // Signing message: sha3_256("APTOS::RawTransaction") || bcs_bytes
+  const domainSep = sha3_256(new TextEncoder().encode("APTOS::RawTransaction"));
+  const rawTxnBytes = rawTxn.bcsToBytes();
+  const signingMsg = new Uint8Array(domainSep.length + rawTxnBytes.length);
+  signingMsg.set(domainSep);
+  signingMsg.set(rawTxnBytes, domainSep.length);
+
+  const privateKey = new Ed25519PrivateKey(normalizeKeyHex(keyHex));
+  const signature = privateKey.sign(signingMsg);
+  const publicKey = privateKey.publicKey();
+
+  return {
+    action: "sign",
+    txn_type: state.txnType,
+    public_key: publicKey.toString(),
+    signature: signature.toString(),
+  };
+}
+
 async function main(): Promise<void> {
   const state = parseArgList(process.argv.slice(2));
   const inputFormat = detectFormat(state.input, state.inputFormat, "json");
@@ -1292,7 +1441,16 @@ async function main(): Promise<void> {
   }
   requireValidState(state, spec);
 
-  const payload = state.sdkMode === "mock" ? await runMock(state, spec) : await runReal(state, spec);
+  let payload: Record<string, unknown>;
+  if (state.action === "encode") {
+    payload = await runEncode(state, spec);
+  } else if (state.action === "decode") {
+    payload = await runDecode(state);
+  } else if (state.action === "sign") {
+    payload = await runSign(state);
+  } else {
+    payload = state.sdkMode === "mock" ? await runMock(state, spec) : await runReal(state, spec);
+  }
   writeArtifacts(state.artifactsDir, payload);
   const outputFormat = detectFormat(
     state.output,

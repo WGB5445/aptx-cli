@@ -8,8 +8,10 @@ This directory contains language-specific implementations of the same canonical 
 | --- | --- | --- | --- |
 | TypeScript | `@aptos-labs/ts-sdk` | `single`, `multi-agent`, `multi-key`, `multi-sig`, `inspect` | yes |
 | Go | `github.com/aptos-labs/aptos-go-sdk` | `single`, `multi-agent`, `multi-sig`, `inspect` | yes |
-| Python | `aptos-python-sdk` | mock-oriented | no |
-| Rust | `aptos-rust-sdk` | mock-oriented | no |
+| Python | `aptos-sdk >= 0.11.0` (PyPI) | `single` ✅, `multi-agent` ⚠️ (primary-only), `multi-key`/`multi-sig` ❌ | no |
+| Rust | `aptos-sdk = "0.5.0"` (crates.io) | `single` ✅, `multi-agent` ✅ (NoAccountAuth), `multi-key`/`multi-sig` ❌ | no |
+
+Legend: ✅ full support, ⚠️ partial (see [sdk-feedback.md](../docs/sdk-feedback.md)), ❌ not yet implemented
 
 ## Why The Matrix Is Uneven
 
@@ -17,7 +19,12 @@ The workspace is intentionally staged.
 
 - TypeScript is the primary real backend and the fastest place to add new CLI behavior.
 - Go is the second real backend and is used to cross-check real SDK behavior.
-- Python and Rust are still kept in the shared conformance path so command shape and stable JSON output can stay aligned while real coverage catches up.
+- Python and Rust now have **real SDK paths** for single and multi-agent simulation.
+  Rust uses `aptos-sdk = "0.5.0"` (from [aptos-rust-sdk](https://github.com/aptos-labs/aptos-rust-sdk))
+  which provides `NoAccountAuthenticator` for keyless simulation and `build_simulation_signed_multi_agent`
+  for multi-agent. Python falls back to primary-only for multi-agent (SDK limitation).
+- Multi-key and multi-sig remain mock-only for Python and Rust pending upstream SDK support.
+  See [docs/sdk-feedback.md](../docs/sdk-feedback.md) for the full analysis.
 
 ## Current Rule
 

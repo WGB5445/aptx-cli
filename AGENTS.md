@@ -3,9 +3,11 @@
 This repository is an Aptos transaction CLI workspace. It contains:
 
 - a canonical CLI contract in `spec/`
-- shared fixtures and conformance checks in `fixtures/` and `conformance/`
+- shared test cases and conformance checks in `conformance/`
+- shared fixtures in `fixtures/`
 - multiple language implementations in `implementations/`
 - localnet-backed integration coverage in `tests/` and language-specific integration tests
+- SDK version management scripts in `scripts/`
 
 ## Intent
 
@@ -15,37 +17,87 @@ The project is not a single CLI implementation. It is a workspace for keeping se
 - transaction behavior compatibility
 - localnet usability
 
+When an SDK releases a new version or a branch is ready for review, the workspace provides a structured way to:
+1. compare the new version's behavior against a saved baseline
+2. see exactly which fields changed
+3. understand what developers need to update
+
 ## Primary Layout
 
-- `README.md`: workspace entrypoint and current status
-- `docs/architecture.md`: high-level architecture and validation model
-- `spec/canonical-cli.md`: canonical command and flag contract
-- `conformance/run.py`: shared mock-shape conformance runner
-- `tests/live_multi_agent.py`: shared real multi-agent integration helper
-- `implementations/README.md`: implementation status matrix
-- `implementations/typescript`: TS SDK implementation, with Node/Bun/Deno entrypoints
-- `implementations/go`: Go SDK implementation and Go integration tests
-- `implementations/python`: Python mock-oriented implementation
-- `implementations/rust`: Rust mock-oriented implementation
+| Path | Purpose |
+|---|---|
+| `README.md` | Workspace entrypoint and quick start |
+| `UPGRADING.md` | Step-by-step guide for SDK upgrade checking |
+| `docs/architecture.md` | Architecture and validation model |
+| `spec/canonical-cli.md` | Canonical command and flag contract |
+| `spec/output-schema.json` | JSON Schema for the conformance output projection |
+| `conformance/run.py` | Conformance runner (loads from `conformance/cases/`) |
+| `conformance/cases/` | YAML test case definitions (one file per case) |
+| `conformance/baselines/` | Saved conformance baselines for version comparison |
+| `scripts/set-sdk-version.sh` | Pin an implementation's SDK to a version or git ref |
+| `scripts/show-sdk-versions.sh` | Print currently pinned SDK versions |
+| `tests/live_multi_agent.py` | Shared real multi-agent integration helper |
+| `implementations/README.md` | Implementation status matrix |
+| `implementations/typescript` | TS SDK implementation (Node/Bun/Deno) |
+| `implementations/go` | Go SDK implementation and integration tests |
+| `implementations/python` | Python mock-oriented implementation |
+| `implementations/rust` | Rust mock-oriented implementation |
+
+## SDK Upgrade Checking
+
+See `UPGRADING.md` for the full workflow. Quick reference:
+
+```bash
+# 1. Save baseline at current SDK versions
+python3 conformance/run.py --save-baseline conformance/baselines/go-sdk-1.12.json
+
+# 2. Switch to a new version or branch
+./scripts/set-sdk-version.sh go v1.13.0
+
+# 3. Compare against baseline — shows field-level diffs if anything changed
+python3 conformance/run.py --compare-baseline conformance/baselines/go-sdk-1.12.json
+```
+
+## Adding Test Cases
+
+Test cases are YAML files in `conformance/cases/`. No Python code changes needed:
+
+1. Create `conformance/cases/<name>.yaml`
+2. Define `name`, `description`, `implementations`, and `argv`
+3. Run `python3 conformance/run.py --filter <name>` to verify
+
+See `conformance/README.md` for the YAML format.
 
 ## Working Rules
 
-- Preserve the canonical CLI shape unless the spec and at least the active implementations are updated together.
+- Preserve the canonical CLI shape unless `spec/canonical-cli.md` and all active implementations are updated together.
 - Prefer localnet-backed tests for real SDK changes.
 - Keep mock conformance working even when only part of the workspace has real SDK support.
 - Do not commit local build artifacts or generated binaries.
 
 ## Validation
 
-Before considering a real backend change complete, run the relevant checks:
+Before considering a real backend change complete:
 
-- `python3 conformance/run.py`
-- `cd implementations/typescript && pnpm exec tsc --noEmit`
-- `cd implementations/go && go build ./...`
-- localnet-backed tests for any changed real transaction path
+```bash
+# Mock conformance (all languages)
+python3 conformance/run.py
+
+# TypeScript type check
+cd implementations/typescript && pnpm exec tsc --noEmit
+
+# Go build
+cd implementations/go && go build ./...
+
+# Localnet-backed tests for any changed real transaction path
+# (see .github/workflows/ci.yml for the full test commands)
+```
 
 ## Current Reality
 
-- TypeScript has the broadest real coverage.
-- Go has real `single`, `multi-agent`, and `multi-sig` coverage; `multi-key` is still pending.
-- Python and Rust are currently kept in the shared conformance path, not the real localnet path.
+| Implementation | SDK | Real Coverage | Localnet |
+|---|---|---|---|
+| TypeScript | `@aptos-labs/ts-sdk` ^6.1.0 | single, multi-agent, multi-key, multi-sig | yes |
+| Go | `aptos-go-sdk` v1.12.0 | single, multi-agent, multi-sig (multi-key pending) | yes |
+| Python | `aptos-python-sdk` | mock only | no |
+| Rust | `aptos-rust-sdk` | mock only | no |

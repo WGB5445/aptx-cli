@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "aptx-conformance-projection",
+  "title": "aptx conformance projection",
+  "description": "The normalized subset of each implementation's JSON output that is compared across implementations and against baselines. All implementations must produce exactly this shape.",
+  "type": "object",
+  "required": [
+    "action",
+    "txn_type",
+    "function",
+    "args",
+    "type_args",
+    "sender_address",
+    "abi_enabled",
+    "sign_mode",
+    "result_mode",
+    "success",
+    "vm_status",
+    "gas_used"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "action": {
+      "type": "string",
+      "enum": ["simulate", "submit", "run", "inspect"],
+      "description": "The CLI action that was invoked."
+    },
+    "txn_type": {
+      "type": "string",
+      "enum": ["single", "multi-agent", "multi-key", "multi-sig"],
+      "description": "The transaction type."
+    },
+    "function": {
+      "type": ["string", "null"],
+      "description": "The Move entry function, e.g. '0x1::aptos_account::transfer'."
+    },
+    "args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Parsed transaction arguments in '<type>:<value>' format."
+    },
+    "type_args": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Move type arguments."
+    },
+    "sender_address": {
+      "type": "string",
+      "pattern": "^0x[0-9a-f]{64}$",
+      "description": "Sender address normalized to full 64-hex-char form with 0x prefix."
+    },
+    "abi_enabled": {
+      "type": "boolean",
+      "description": "Whether ABI resolution was enabled for this transaction."
+    },
+    "sign_mode": {
+      "type": "string",
+      "enum": ["none", "single", "multi-key", "multi-sig", "multi-agent"],
+      "description": "The signing mode used."
+    },
+    "result_mode": {
+      "type": "string",
+      "enum": ["simulate", "submit", "dry-run"],
+      "description": "How the result was produced."
+    },
+    "success": {
+      "type": "boolean",
+      "description": "Whether the transaction succeeded (in simulate/dry-run mode this is always true for mock)."
+    },
+    "vm_status": {
+      "type": "string",
+      "description": "The VM status string returned by the node or mock."
+    },
+    "gas_used": {
+      "type": ["integer", "null"],
+      "description": "Gas units used (mock returns a fixed value; real network returns the actual value)."
+    }
+  }
+}

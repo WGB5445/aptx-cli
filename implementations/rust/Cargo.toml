@@ -5,3 +5,16 @@ edition = "2021"
 description = "Rust implementation of the Aptos transaction CLI targeting aptos-rust-sdk"
 
 [dependencies]
+# Aptos Rust SDK — published by Aptos Labs on crates.io from the standalone
+# github.com/aptos-labs/aptos-rust-sdk repository (not the Aptos monorepo).
+# 0.5.0 requires Rust >= 1.95.0 (see rust-toolchain.toml).
+aptos-sdk = { version = "0.5.0", default-features = false, features = ["ed25519"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Error handling
+anyhow = "1"
+
+# JSON for inspecting simulation result fields
+serde_json = "1"

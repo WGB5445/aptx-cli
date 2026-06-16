@@ -1,3 +1,5 @@
+mod sdk;
+
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -44,8 +46,16 @@ struct State {
     verbose: bool,
     quiet: bool,
     sdk_mode: String,
+    // encode / decode / sign fields
+    sequence_number: Option<u64>,
+    chain_id: Option<u8>,
+    max_gas_amount: Option<u64>,
+    gas_unit_price: Option<u64>,
+    expiration_timestamp: Option<u64>,
+    input_bcs: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 struct InputSpec {
     network: String,
@@ -76,14 +86,24 @@ enum ArgSpec {
     Raw { raw: String, hex: String },
 }
 
-fn main() {
-    if let Err(err) = run(env::args().skip(1).collect()) {
+struct SimOverride {
+    success: bool,
+    vm_status: String,
+    gas_used: u64,
+    tx_hash: String,
+    notes: Vec<String>,
+    sdk_backend: String,
+}
+
+#[tokio::main]
+async fn main() {
+    if let Err(err) = run(env::args().skip(1).collect()).await {
         eprintln!("{err}");
         std::process::exit(2);
     }
 }
 
-fn run(argv: Vec<String>) -> Result<(), String> {
+async fn run(argv: Vec<String>) -> Result<(), String> {
     let state = parse_cli(&argv)?;
     let input_format = detect_format(
         state.input.as_deref(),
@@ -168,6 +188,92 @@ fn run(argv: Vec<String>) -> Result<(), String> {
         no_sign: state.no_sign || get_bool(&file_input, "no_sign", false),
     };
 
+    // ---- encode / decode / sign: dispatch early and return ----
+    if state.action == "encode" {
+        if spec.function.is_empty() {
+            return Err("encode requires --function".to_string());
+        }
+        let bcs_hex = sdk::encode_transaction(
+            &spec.sender_address,
+            &spec.function,
+            &spec.type_args,
+            &spec.args,
+            state.sequence_number.unwrap_or(0),
+            state.chain_id.unwrap_or(4),
+            state.max_gas_amount.unwrap_or(200_000),
+            state.gas_unit_price.unwrap_or(100),
+            state.expiration_timestamp.unwrap_or(9_999_999_999),
+        )
+        .map_err(|e| e.to_string())?;
+
+        let result = serde_json::json!({
+            "action": "encode",
+            "txn_type": state.txn_type,
+            "bcs": bcs_hex,
+            "sender": spec.sender_address,
+            "function": spec.function,
+            "chain_id": state.chain_id.unwrap_or(4),
+            "sequence_number": state.sequence_number.unwrap_or(0),
+            "max_gas_amount": state.max_gas_amount.unwrap_or(200_000),
+            "gas_unit_price": state.gas_unit_price.unwrap_or(100),
+            "expiration_timestamp": state.expiration_timestamp.unwrap_or(9_999_999_999u64),
+        });
+        let rendered = result.to_string();
+        if let Some(path) = &state.output {
+            if path != "-" {
+                std::fs::write(path, format!("{rendered}\n")).map_err(|e| e.to_string())?;
+            } else if !state.quiet {
+                println!("{rendered}");
+            }
+        } else if !state.quiet {
+            println!("{rendered}");
+        }
+        return Ok(());
+    }
+
+    if state.action == "decode" {
+        let bcs_hex = state
+            .input_bcs
+            .as_deref()
+            .ok_or_else(|| "decode requires --input-bcs".to_string())?;
+        let result = sdk::decode_transaction(bcs_hex).map_err(|e| e.to_string())?;
+        let rendered = result.to_string();
+        if let Some(path) = &state.output {
+            if path != "-" {
+                std::fs::write(path, format!("{rendered}\n")).map_err(|e| e.to_string())?;
+            } else if !state.quiet {
+                println!("{rendered}");
+            }
+        } else if !state.quiet {
+            println!("{rendered}");
+        }
+        return Ok(());
+    }
+
+    if state.action == "sign" {
+        let bcs_hex = state
+            .input_bcs
+            .as_deref()
+            .ok_or_else(|| "sign requires --input-bcs".to_string())?;
+        let private_key = state
+            .private_key
+            .as_deref()
+            .ok_or_else(|| "sign requires --private-key".to_string())?;
+        let result = sdk::sign_transaction(bcs_hex, private_key).map_err(|e| e.to_string())?;
+        let rendered = result.to_string();
+        if let Some(path) = &state.output {
+            if path != "-" {
+                std::fs::write(path, format!("{rendered}\n")).map_err(|e| e.to_string())?;
+            } else if !state.quiet {
+                println!("{rendered}");
+            }
+        } else if !state.quiet {
+            println!("{rendered}");
+        }
+        return Ok(());
+    }
+    // ---- end encode/decode/sign ----
+
     if state.action != "inspect" && spec.function.is_empty() && spec.script_hex.is_empty() && state.txn_type != "multi-sig" {
         return Err("missing function".to_string());
     }
@@ -244,7 +350,54 @@ fn run(argv: Vec<String>) -> Result<(), String> {
         state.action.clone()
     };
 
-    let payload = render_payload(&state, &spec, &parsed_args, &sign_mode, &digest, &result_mode);
+    let sim_override = if state.sdk_mode != "mock"
+        && (state.action == "simulate" || state.action == "run")
+        && (state.txn_type == "single" || state.txn_type == "multi-agent")
+    {
+        let fullnode_opt = if spec.fullnode.is_empty() { None } else { Some(spec.fullnode.as_str()) };
+        let res = if state.txn_type == "multi-agent" {
+            sdk::simulate_multi_agent(
+                &spec.network,
+                fullnode_opt,
+                &spec.sender_address,
+                &spec.function,
+                &spec.args,
+                &spec.type_args,
+                &spec.secondary_signer_addresses,
+            ).await
+        } else {
+            sdk::simulate_single(
+                &spec.network,
+                fullnode_opt,
+                &spec.sender_address,
+                &spec.function,
+                &spec.args,
+                &spec.type_args,
+            ).await
+        };
+        Some(match res {
+            Ok(r) => SimOverride {
+                success: r.success,
+                vm_status: r.vm_status,
+                gas_used: r.gas_used,
+                tx_hash: r.tx_hash,
+                notes: vec![],
+                sdk_backend: "aptos-rest-api (real)".to_string(),
+            },
+            Err(e) => SimOverride {
+                success: false,
+                vm_status: "sdk error".to_string(),
+                gas_used: 0,
+                tx_hash: digest.clone(),
+                notes: vec![format!("sdk error: {e}")],
+                sdk_backend: "aptos-rest-api (real)".to_string(),
+            },
+        })
+    } else {
+        None
+    };
+
+    let payload = render_payload(&state, &spec, &parsed_args, &sign_mode, &digest, &result_mode, sim_override.as_ref());
 
     if let Some(dir) = &state.artifacts_dir {
         fs::create_dir_all(dir).map_err(|e| e.to_string())?;
@@ -282,11 +435,21 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
         return Err("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]".to_string());
     }
     let action = argv[0].clone();
-    let (txn_type, start) = if action == "inspect" {
+    let (txn_type, start) = if action == "inspect" || action == "decode" || action == "sign" {
         ("single".to_string(), 1)
+    } else if action == "encode" {
+        // encode takes an optional txn-type subcommand (default: single)
+        let maybe_type = argv.get(1).map(|s| s.as_str()).unwrap_or("");
+        if maybe_type == "single" || maybe_type == "orderless" || maybe_type == "multi-agent"
+            || maybe_type == "multi-key" || maybe_type == "multi-sig"
+        {
+            (maybe_type.to_string(), 2)
+        } else {
+            ("single".to_string(), 1)
+        }
     } else {
         if argv.len() < 2 {
-            return Err("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]".to_string());
+            return Err("usage: aptx <simulate|submit|run|inspect|encode|decode|sign> <txn-type> [flags]".to_string());
         }
         (argv[1].clone(), 2)
     };
@@ -330,6 +493,12 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
         verbose: false,
         quiet: false,
         sdk_mode: "mock".to_string(),
+        sequence_number: None,
+        chain_id: None,
+        max_gas_amount: None,
+        gas_unit_price: None,
+        expiration_timestamp: None,
+        input_bcs: None,
     };
 
     let mut i = start;
@@ -493,6 +662,45 @@ fn parse_cli(argv: &[String]) -> Result<State, String> {
             }
             "--sdk-mode" => {
                 state.sdk_mode = next.unwrap_or_else(|| "mock".to_string());
+                i += 2;
+            }
+            "--sequence-number" => {
+                let value = next.ok_or_else(|| "missing value for --sequence-number".to_string())?;
+                state.sequence_number = Some(
+                    value.parse::<u64>().map_err(|_| format!("invalid --sequence-number: {value}"))?,
+                );
+                i += 2;
+            }
+            "--chain-id" => {
+                let value = next.ok_or_else(|| "missing value for --chain-id".to_string())?;
+                state.chain_id = Some(
+                    value.parse::<u8>().map_err(|_| format!("invalid --chain-id: {value}"))?,
+                );
+                i += 2;
+            }
+            "--max-gas-amount" => {
+                let value = next.ok_or_else(|| "missing value for --max-gas-amount".to_string())?;
+                state.max_gas_amount = Some(
+                    value.parse::<u64>().map_err(|_| format!("invalid --max-gas-amount: {value}"))?,
+                );
+                i += 2;
+            }
+            "--gas-unit-price" => {
+                let value = next.ok_or_else(|| "missing value for --gas-unit-price".to_string())?;
+                state.gas_unit_price = Some(
+                    value.parse::<u64>().map_err(|_| format!("invalid --gas-unit-price: {value}"))?,
+                );
+                i += 2;
+            }
+            "--expiration-timestamp" => {
+                let value = next.ok_or_else(|| "missing value for --expiration-timestamp".to_string())?;
+                state.expiration_timestamp = Some(
+                    value.parse::<u64>().map_err(|_| format!("invalid --expiration-timestamp: {value}"))?,
+                );
+                i += 2;
+            }
+            "--input-bcs" => {
+                state.input_bcs = next;
                 i += 2;
             }
             "--no-sign" => {
@@ -772,15 +980,28 @@ fn render_payload(
     sign_mode: &str,
     digest: &str,
     result_mode: &str,
+    sim_override: Option<&SimOverride>,
 ) -> PayloadRender {
     let parsed_args_json: Vec<String> = parsed_args.iter().map(render_arg_json).collect();
     let parsed_args_yaml: Vec<String> = parsed_args.iter().map(render_arg_yaml).collect();
-    let notes = if state.sdk_mode == "mock" {
-        vec!["mock backend active", "sdk integration point reserved"]
-    } else {
-        vec!["sdk backend requested"]
-    };
-    let notes_json = notes
+
+    let (success, vm_status, gas_used, tx_hash, notes_owned, sdk_backend) =
+        if let Some(o) = sim_override {
+            (o.success, o.vm_status.as_str(), o.gas_used, o.tx_hash.as_str(), o.notes.clone(), o.sdk_backend.as_str())
+        } else {
+            let mock_notes: Vec<String> = if state.sdk_mode == "mock" {
+                vec!["mock backend active".to_string(), "sdk integration point reserved".to_string()]
+            } else {
+                vec![]
+            };
+            (true, "Executed successfully", 0u64, digest, mock_notes, "aptos-rust-sdk")
+        };
+
+    let mock_gas = spec.function.len() + spec.args.len() * 111 + spec.type_args.len() * 37;
+    let effective_gas = if sim_override.is_some() { gas_used } else { mock_gas as u64 };
+    let effective_tx_hash = if sim_override.is_some() { tx_hash } else { digest };
+
+    let notes_json = notes_owned
         .iter()
         .map(|item| format!("      \"{}\"", escape_json(item)))
         .collect::<Vec<_>>()
@@ -798,7 +1019,8 @@ fn render_payload(
         .collect::<Vec<_>>()
         .join(",\n");
     let json = format!(
-        "{{\n  \"cli\": \"aptx\",\n  \"implementation\": \"rust\",\n  \"sdk_backend\": \"aptos-rust-sdk\",\n  \"sdk_mode\": \"{}\",\n  \"action\": \"{}\",\n  \"txn_type\": \"{}\",\n  \"abi_enabled\": {},\n  \"input\": {{\n    \"network\": \"{}\",\n    \"function\": \"{}\",\n    \"sender_address\": \"{}\",\n    \"args\": [\n{}\n    ],\n    \"parsed_args\": [\n{}\n    ],\n    \"type_args\": [\n{}\n    ]\n  }},\n  \"signing\": {{\n    \"mode\": \"{}\",\n    \"provided\": {},\n    \"redacted\": true\n  }},\n  \"result\": {{\n    \"mode\": \"{}\",\n    \"success\": true,\n    \"vm_status\": \"Executed successfully\",\n    \"tx_hash\": \"{}\",\n    \"gas_used\": {},\n    \"notes\": [\n{}\n    ]\n  }}\n}}",
+        "{{\n  \"cli\": \"aptx\",\n  \"implementation\": \"rust\",\n  \"sdk_backend\": \"{}\",\n  \"sdk_mode\": \"{}\",\n  \"action\": \"{}\",\n  \"txn_type\": \"{}\",\n  \"abi_enabled\": {},\n  \"input\": {{\n    \"network\": \"{}\",\n    \"function\": \"{}\",\n    \"sender_address\": \"{}\",\n    \"args\": [\n{}\n    ],\n    \"parsed_args\": [\n{}\n    ],\n    \"type_args\": [\n{}\n    ]\n  }},\n  \"signing\": {{\n    \"mode\": \"{}\",\n    \"provided\": {},\n    \"redacted\": true\n  }},\n  \"result\": {{\n    \"mode\": \"{}\",\n    \"success\": {},\n    \"vm_status\": \"{}\",\n    \"tx_hash\": \"{}\",\n    \"gas_used\": {},\n    \"notes\": [\n{}\n    ]\n  }}\n}}",
+        escape_json(sdk_backend),
         escape_json(&state.sdk_mode),
         escape_json(&state.action),
         escape_json(&state.txn_type),
@@ -812,12 +1034,15 @@ fn render_payload(
         escape_json(sign_mode),
         if sign_mode != "none" { "true" } else { "false" },
         escape_json(result_mode),
-        escape_json(digest),
-        spec.function.len() + spec.args.len() * 111 + spec.type_args.len() * 37,
+        if success { "true" } else { "false" },
+        escape_json(vm_status),
+        escape_json(effective_tx_hash),
+        effective_gas,
         notes_json
     );
     let yaml = format!(
-        "cli: aptx\nimplementation: rust\nsdk_backend: aptos-rust-sdk\nsdk_mode: {}\naction: {}\ntxn_type: {}\nabi_enabled: {}\ninput:\n  network: {}\n  function: {}\n  sender_address: {}\n  args:\n{}\n  parsed_args:\n{}\n  type_args:\n{}\nsigning:\n  mode: {}\n  provided: {}\n  redacted: true\nresult:\n  mode: {}\n  success: true\n  vm_status: Executed successfully\n  tx_hash: {}\n  gas_used: {}\n  notes:\n{}",
+        "cli: aptx\nimplementation: rust\nsdk_backend: {}\nsdk_mode: {}\naction: {}\ntxn_type: {}\nabi_enabled: {}\ninput:\n  network: {}\n  function: {}\n  sender_address: {}\n  args:\n{}\n  parsed_args:\n{}\n  type_args:\n{}\nsigning:\n  mode: {}\n  provided: {}\n  redacted: true\nresult:\n  mode: {}\n  success: {}\n  vm_status: {}\n  tx_hash: {}\n  gas_used: {}\n  notes:\n{}",
+        sdk_backend,
         state.sdk_mode,
         state.action,
         state.txn_type,
@@ -835,13 +1060,15 @@ fn render_payload(
         sign_mode,
         if sign_mode != "none" { "true" } else { "false" },
         result_mode,
-        digest,
-        spec.function.len() + spec.args.len() * 111 + spec.type_args.len() * 37,
-        render_yaml_list(&notes.iter().map(|s| s.to_string()).collect::<Vec<_>>(), 4)
+        success,
+        vm_status,
+        effective_tx_hash,
+        effective_gas,
+        render_yaml_list(&notes_owned, 4)
     );
     let table = format!(
-        "implementation | rust\nsdk_backend    | aptos-rust-sdk\naction         | {}\ntxn_type       | {}\nfunction       | {}\nsender         | {}\nvm_status      | Executed successfully\ntx_hash        | {}",
-        state.action, state.txn_type, spec.function, spec.sender_address, digest
+        "implementation | rust\nsdk_backend    | {}\naction         | {}\ntxn_type       | {}\nfunction       | {}\nsender         | {}\nvm_status      | {}\ntx_hash        | {}",
+        sdk_backend, state.action, state.txn_type, spec.function, spec.sender_address, vm_status, effective_tx_hash
     );
     let ascii = format!(
         "+----------------------------------------------+\n| Aptos Transaction CLI                        |\n+----------------------------------------------+\n| action        | {:<28}|\n| txn_type      | {:<28}|\n| function      | {:<28}|\n| sender        | {:<28}|\n| vm_status     | {:<28}|\n| tx_hash       | {:<28}|\n+----------------------------------------------+",
@@ -849,8 +1076,8 @@ fn render_payload(
         state.txn_type,
         truncate_pad(&spec.function, 28),
         truncate_pad(&spec.sender_address, 28),
-        "Executed successfully",
-        truncate_pad(digest, 28)
+        truncate_pad(vm_status, 28),
+        truncate_pad(effective_tx_hash, 28)
     );
     PayloadRender { json, yaml, table, ascii }
 }

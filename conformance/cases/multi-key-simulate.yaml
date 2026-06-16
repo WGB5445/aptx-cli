@@ -1,0 +1,22 @@
+name: multi-key-simulate
+description: Simulate a multi-key transaction with inline flags (Go excluded — multi-key not yet implemented)
+implementations: [typescript, python, rust]
+argv:
+  - simulate
+  - multi-key
+  - --network
+  - testnet
+  - --function
+  - "0x1::aptos_account::transfer"
+  - --sender-address
+  - "0x111"
+  - --multi-key-threshold
+  - "2"
+  - --multi-key-public-key
+  - "0xaaa"
+  - --multi-key-public-key
+  - "0xbbb"
+  - --arg
+  - "address:0x333"
+  - --arg
+  - "u64:1000"

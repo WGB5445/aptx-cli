@@ -1,0 +1,8 @@
+name: single-simulate
+description: Simulate a single transfer transaction loaded from a JSON fixture
+implementations: [typescript, python, go, rust]
+argv:
+  - simulate
+  - single
+  - --input
+  - "{{fixtures}}/transactions/single-transfer.json"

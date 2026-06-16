@@ -1,0 +1,112 @@
+{
+  "status": "ok",
+  "sdk_versions": {
+    "typescript": "^7.1.0",
+    "go": "v1.13.0",
+    "python": "aptos-sdk>=0.11.0",
+    "rust": "0.5.0"
+  },
+  "cases": {
+    "decode-single": {
+      "action": "decode",
+      "txn_type": "single",
+      "sender": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "function": "0x1::aptos_account::transfer",
+      "chain_id": 4,
+      "sequence_number": 0,
+      "max_gas_amount": 200000,
+      "gas_unit_price": 100,
+      "expiration_timestamp": 9999999999
+    },
+    "encode-single": {
+      "action": "encode",
+      "txn_type": "single",
+      "bcs": "0x111111111111111111111111111111111111111111111111111111111111111100000000000000000200000000000000000000000000000000000000000000000000000000000000010d6170746f735f6163636f756e74087472616e73666572000220222222222222222222222222222222222222222222222222222222222222222208e803000000000000400d0300000000006400000000000000ffe30b540200000004",
+      "function": "0x1::aptos_account::transfer",
+      "chain_id": 4,
+      "sequence_number": 0,
+      "max_gas_amount": 200000,
+      "gas_unit_price": 100,
+      "expiration_timestamp": 9999999999
+    },
+    "multi-agent-simulate": {
+      "action": "simulate",
+      "txn_type": "multi-agent",
+      "function": "0x1::aptos_account::transfer",
+      "args": [
+        "address:0x333",
+        "u64:1000"
+      ],
+      "type_args": [],
+      "sender_address": "0x0000000000000000000000000000000000000000000000000000000000000111",
+      "abi_enabled": true,
+      "sign_mode": "none",
+      "result_mode": "simulate",
+      "success": true,
+      "vm_status": "Executed successfully",
+      "gas_used": 250
+    },
+    "multi-key-simulate": {
+      "action": "simulate",
+      "txn_type": "multi-key",
+      "function": "0x1::aptos_account::transfer",
+      "args": [
+        "address:0x333",
+        "u64:1000"
+      ],
+      "type_args": [],
+      "sender_address": "0x0000000000000000000000000000000000000000000000000000000000000111",
+      "abi_enabled": true,
+      "sign_mode": "none",
+      "result_mode": "simulate",
+      "success": true,
+      "vm_status": "Executed successfully",
+      "gas_used": 250
+    },
+    "multi-sig-propose-simulate": {
+      "action": "simulate",
+      "txn_type": "multi-sig",
+      "function": "0x1::aptos_account::transfer",
+      "args": [
+        "address:0x333",
+        "u64:1000"
+      ],
+      "type_args": [],
+      "sender_address": "0x0000000000000000000000000000000000000000000000000000000000000111",
+      "abi_enabled": true,
+      "sign_mode": "none",
+      "result_mode": "simulate",
+      "success": true,
+      "vm_status": "Executed successfully",
+      "gas_used": 250
+    },
+    "sign-single-ed25519": {
+      "action": "sign",
+      "public_key": "0x8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+      "signature": "0xc3b7eeb5982bbb4b27cb2e0e1390704174eb545e6c1d0c08d65fd11d8328c3810875b52c7ffca4d0f97acf2b0e17f5c896d7f23901bbacbad1ad43ca11ede301"
+    },
+    "single-simulate": {
+      "action": "simulate",
+      "txn_type": "single",
+      "function": "0x1::aptos_account::transfer",
+      "args": [
+        "address:0x222",
+        "u64:1000"
+      ],
+      "type_args": [],
+      "sender_address": "0x0000000000000000000000000000000000000000000000000000000000000111",
+      "abi_enabled": true,
+      "sign_mode": "none",
+      "result_mode": "simulate",
+      "success": true,
+      "vm_status": "Executed successfully",
+      "gas_used": 250
+    }
+  },
+  "implementations": [
+    "typescript",
+    "python",
+    "go",
+    "rust"
+  ]
+}

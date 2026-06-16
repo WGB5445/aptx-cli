@@ -67,6 +67,14 @@ type State struct {
 	Verbose                  bool
 	Quiet                    bool
 	SDKMode                  string
+	SequenceNumber           uint64
+	ChainID                  uint8
+	MaxGasAmount             uint64
+	GasUnitPrice             uint64
+	ExpirationTimestamp      uint64
+	Nonce                    string
+	InputBcs                 string
+	FeePayerAddress          string
 }
 
 type InputSpec struct {
@@ -127,6 +135,275 @@ func (s *simulationOnlySigner) PubKey() crypto.PublicKey {
 	return s.publicKey
 }
 
+// buildEntryFunctionArgs converts ["type:value", ...] arg strings to BCS-encoded [][]byte
+func buildEntryFunctionArgs(args []string) ([][]byte, error) {
+	result := make([][]byte, 0, len(args))
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "raw:") {
+			hexStr := arg[4:]
+			b, err := hex.DecodeString(strings.TrimPrefix(hexStr, "0x"))
+			if err != nil {
+				return nil, fmt.Errorf("invalid raw arg hex: %v", err)
+			}
+			result = append(result, b)
+			continue
+		}
+		idx := strings.Index(arg, ":")
+		if idx == -1 {
+			return nil, fmt.Errorf("invalid arg format: %s", arg)
+		}
+		kind := arg[:idx]
+		val := arg[idx+1:]
+		switch kind {
+		case "u8":
+			n, err := strconv.ParseUint(val, 10, 8)
+			if err != nil {
+				return nil, fmt.Errorf("bad u8: %v", err)
+			}
+			b, err := bcs.SerializeU8(uint8(n))
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		case "u16":
+			n, err := strconv.ParseUint(val, 10, 16)
+			if err != nil {
+				return nil, fmt.Errorf("bad u16: %v", err)
+			}
+			b, err := bcs.SerializeU16(uint16(n))
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		case "u32":
+			n, err := strconv.ParseUint(val, 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("bad u32: %v", err)
+			}
+			b, err := bcs.SerializeU32(uint32(n))
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		case "u64":
+			n, err := strconv.ParseUint(val, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("bad u64: %v", err)
+			}
+			b, err := bcs.SerializeU64(n)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		case "u128":
+			n := new(big.Int)
+			if _, ok := n.SetString(val, 10); !ok {
+				return nil, fmt.Errorf("bad u128: %s", val)
+			}
+			b, err := bcs.SerializeU128(*n)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		case "bool":
+			b, err := bcs.SerializeBool(val == "true")
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		case "address":
+			addr, err := parseAddress(val)
+			if err != nil {
+				return nil, fmt.Errorf("bad address: %v", err)
+			}
+			b, err := bcs.Serialize(&addr)
+			if err != nil {
+				return nil, fmt.Errorf("failed to serialize address: %v", err)
+			}
+			result = append(result, b)
+		case "string":
+			b, err := bcs.SerializeBytes([]byte(val))
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, b)
+		default:
+			return nil, fmt.Errorf("unsupported arg type: %s", kind)
+		}
+	}
+	return result, nil
+}
+
+func runEncode(state State, spec InputSpec) (map[string]any, error) {
+	funcParts := strings.SplitN(spec.Function, "::", 3)
+	if len(funcParts) != 3 {
+		return nil, fmt.Errorf("invalid function: %s", spec.Function)
+	}
+	moduleAddr, err := parseAddress(funcParts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid module address: %v", err)
+	}
+
+	argBytes, err := buildEntryFunctionArgs(spec.Args)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode args: %v", err)
+	}
+
+	typeArgs := make([]aptos.TypeTag, len(spec.TypeArgs))
+	for i, ta := range spec.TypeArgs {
+		tag, err := aptos.ParseTypeTag(ta)
+		if err != nil {
+			return nil, fmt.Errorf("invalid type arg %s: %v", ta, err)
+		}
+		typeArgs[i] = *tag
+	}
+
+	ef := &aptos.EntryFunction{
+		Module:   aptos.ModuleId{Address: moduleAddr, Name: funcParts[1]},
+		Function: funcParts[2],
+		ArgTypes: typeArgs,
+		Args:     argBytes,
+	}
+
+	senderAddr, err := parseAddress(spec.SenderAddress)
+	if err != nil {
+		return nil, fmt.Errorf("invalid sender address: %v", err)
+	}
+
+	rawTxn := &aptos.RawTransaction{
+		Sender:                     senderAddr,
+		SequenceNumber:             state.SequenceNumber,
+		Payload:                    aptos.TransactionPayload{Payload: ef},
+		MaxGasAmount:               state.MaxGasAmount,
+		GasUnitPrice:               state.GasUnitPrice,
+		ExpirationTimestampSeconds: state.ExpirationTimestamp,
+		ChainId:                    state.ChainID,
+	}
+
+	bcsBytes, err := bcs.Serialize(rawTxn)
+	if err != nil {
+		return nil, fmt.Errorf("BCS serialize failed: %v", err)
+	}
+
+	return map[string]any{
+		"action":               "encode",
+		"txn_type":             state.TxnType,
+		"bcs":                  "0x" + hex.EncodeToString(bcsBytes),
+		"sender":               spec.SenderAddress,
+		"function":             spec.Function,
+		"chain_id":             state.ChainID,
+		"sequence_number":      state.SequenceNumber,
+		"max_gas_amount":       state.MaxGasAmount,
+		"gas_unit_price":       state.GasUnitPrice,
+		"expiration_timestamp": state.ExpirationTimestamp,
+	}, nil
+}
+
+func runDecode(state State) (map[string]any, error) {
+	if state.InputBcs == "" {
+		return nil, fmt.Errorf("decode requires --input-bcs <hex>")
+	}
+	hexStr := strings.TrimPrefix(state.InputBcs, "0x")
+	bcsBytes, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid BCS hex: %v", err)
+	}
+	rawTxn := &aptos.RawTransaction{}
+	if err := bcs.Deserialize(rawTxn, bcsBytes); err != nil {
+		return nil, fmt.Errorf("BCS deserialize failed: %v", err)
+	}
+
+	const maxU64 = ^uint64(0)
+	isOrderless := rawTxn.SequenceNumber == maxU64
+	seqStr := fmt.Sprintf("%d", rawTxn.SequenceNumber)
+	if isOrderless {
+		seqStr = "max_u64"
+	}
+
+	fn := ""
+	switch p := rawTxn.Payload.Payload.(type) {
+	case *aptos.EntryFunction:
+		fn = p.Module.Address.String() + "::" + p.Module.Name + "::" + p.Function
+	}
+
+	txnTypeStr := "single"
+	if isOrderless {
+		txnTypeStr = "orderless"
+	}
+
+	return map[string]any{
+		"action":               "decode",
+		"txn_type":             txnTypeStr,
+		"sender":               rawTxn.Sender.String(),
+		"function":             fn,
+		"chain_id":             rawTxn.ChainId,
+		"sequence_number":      seqStr,
+		"max_gas_amount":       rawTxn.MaxGasAmount,
+		"gas_unit_price":       rawTxn.GasUnitPrice,
+		"expiration_timestamp": rawTxn.ExpirationTimestampSeconds,
+		"is_orderless":         isOrderless,
+	}, nil
+}
+
+func runSign(state State) (map[string]any, error) {
+	if state.InputBcs == "" {
+		return nil, fmt.Errorf("sign requires --input-bcs <hex>")
+	}
+	privKeyStr := state.PrivateKey
+	if privKeyStr == "" {
+		return nil, fmt.Errorf("sign requires --private-key <hex>")
+	}
+
+	hexStr := strings.TrimPrefix(state.InputBcs, "0x")
+	rawBytes, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid BCS hex: %v", err)
+	}
+	rawTxn := &aptos.RawTransaction{}
+	if err := bcs.Deserialize(rawTxn, rawBytes); err != nil {
+		return nil, fmt.Errorf("BCS deserialize failed: %v", err)
+	}
+
+	keyHex := strings.TrimPrefix(strings.TrimPrefix(privKeyStr, "ed25519-priv-"), "0x")
+	keyBytes, err := hex.DecodeString(keyHex)
+	if err != nil {
+		return nil, fmt.Errorf("invalid private key hex: %v", err)
+	}
+	privKey := &crypto.Ed25519PrivateKey{}
+	if err := privKey.FromBytes(keyBytes); err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %v", err)
+	}
+
+	auth, err := rawTxn.Sign(privKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign: %v", err)
+	}
+
+	sigHex := ""
+	pubKeyHex := ""
+	if ed, ok := auth.Auth.(*crypto.Ed25519Authenticator); ok {
+		sigHex = "0x" + hex.EncodeToString(ed.Sig.Bytes())
+		pubKeyHex = "0x" + hex.EncodeToString(ed.PubKey.Bytes())
+	}
+
+	signedTxn, err := rawTxn.SignedTransactionWithAuthenticator(auth)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build signed transaction: %v", err)
+	}
+	signedBytes, err := bcs.Serialize(signedTxn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize signed txn: %v", err)
+	}
+
+	return map[string]any{
+		"action":     "sign",
+		"txn_type":   state.TxnType,
+		"public_key": pubKeyHex,
+		"signature":  sigHex,
+		"signed_bcs": "0x" + hex.EncodeToString(signedBytes),
+	}, nil
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
@@ -171,10 +448,19 @@ func run(argv []string) error {
 	}
 
 	var payload map[string]any
-	if state.SDKMode == "mock" {
-		payload, err = runMock(state, spec)
-	} else {
-		payload, err = runReal(state, spec)
+	switch state.Action {
+	case "encode":
+		payload, err = runEncode(state, spec)
+	case "decode":
+		payload, err = runDecode(state)
+	case "sign":
+		payload, err = runSign(state)
+	default:
+		if state.SDKMode == "mock" {
+			payload, err = runMock(state, spec)
+		} else {
+			payload, err = runReal(state, spec)
+		}
 	}
 	if err != nil {
 		return err
@@ -193,7 +479,11 @@ func run(argv []string) error {
 		}
 	}
 
-	outputFormat := detectFormat(state.Output, state.OutputFormat, fallbackOutputFormat(state.Output))
+	effectiveOutputFormat := state.OutputFormat
+	if effectiveOutputFormat == "" && (state.Action == "encode" || state.Action == "decode" || state.Action == "sign") {
+		effectiveOutputFormat = "json"
+	}
+	outputFormat := detectFormat(state.Output, effectiveOutputFormat, fallbackOutputFormat(state.Output))
 	rendered, err := renderOutput(payload, outputFormat)
 	if err != nil {
 		return err
@@ -214,9 +504,9 @@ func parseCLI(argv []string) (State, error) {
 	action := argv[0]
 	txnType := "single"
 	start := 1
-	if action != "inspect" {
+	if action != "inspect" && action != "decode" && action != "sign" {
 		if len(argv) < 2 {
-			return State{}, errors.New("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]")
+			return State{}, errors.New("usage: aptx <simulate|submit|run|inspect|encode> <txn-type> [flags]")
 		}
 		txnType = argv[1]
 		start = 2
@@ -337,6 +627,35 @@ func parseCLI(argv []string) (State, error) {
 		case "--sdk-mode":
 			state.SDKMode = next
 			i++
+		case "--sequence-number":
+			n, _ := strconv.ParseUint(next, 10, 64)
+			state.SequenceNumber = n
+			i++
+		case "--chain-id":
+			n, _ := strconv.ParseUint(next, 10, 8)
+			state.ChainID = uint8(n)
+			i++
+		case "--max-gas-amount":
+			n, _ := strconv.ParseUint(next, 10, 64)
+			state.MaxGasAmount = n
+			i++
+		case "--gas-unit-price":
+			n, _ := strconv.ParseUint(next, 10, 64)
+			state.GasUnitPrice = n
+			i++
+		case "--expiration-timestamp":
+			n, _ := strconv.ParseUint(next, 10, 64)
+			state.ExpirationTimestamp = n
+			i++
+		case "--nonce":
+			state.Nonce = next
+			i++
+		case "--input-bcs":
+			state.InputBcs = next
+			i++
+		case "--fee-payer-address":
+			state.FeePayerAddress = next
+			i++
 		case "--no-sign":
 			state.NoSign = true
 		case "--no-abi":
@@ -349,11 +668,23 @@ func parseCLI(argv []string) (State, error) {
 			return State{}, fmt.Errorf("unknown argument: %s", arg)
 		}
 	}
+	if state.MaxGasAmount == 0 {
+		state.MaxGasAmount = 200_000
+	}
+	if state.GasUnitPrice == 0 {
+		state.GasUnitPrice = 100
+	}
+	if state.ExpirationTimestamp == 0 {
+		state.ExpirationTimestamp = 9_999_999_999
+	}
+	if state.ChainID == 0 {
+		state.ChainID = 4
+	}
 	return state, nil
 }
 
 func requireValidState(state State, spec InputSpec) error {
-	if state.Action == "inspect" {
+	if state.Action == "inspect" || state.Action == "encode" || state.Action == "decode" || state.Action == "sign" {
 		return nil
 	}
 	if state.TxnType == "multi-sig" {

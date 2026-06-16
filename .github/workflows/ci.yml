@@ -40,6 +40,9 @@ jobs:
         working-directory: implementations/typescript
         run: pnpm install --frozen-lockfile
 
+      - name: Install conformance dependencies
+        run: pip install pyyaml
+
       - name: TypeScript typecheck
         working-directory: implementations/typescript
         run: pnpm exec tsc --noEmit

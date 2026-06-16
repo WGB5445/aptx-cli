@@ -1,0 +1,24 @@
+name: encode-single
+description: All 4 SDKs encode the same single transfer transaction — BCS bytes must match exactly
+implementations: [typescript, python, go, rust]
+argv:
+  - encode
+  - single
+  - --function
+  - "0x1::aptos_account::transfer"
+  - --sender-address
+  - "0x1111111111111111111111111111111111111111111111111111111111111111"
+  - --arg
+  - "address:0x2222222222222222222222222222222222222222222222222222222222222222"
+  - --arg
+  - "u64:1000"
+  - --sequence-number
+  - "0"
+  - --chain-id
+  - "4"
+  - --max-gas-amount
+  - "200000"
+  - --gas-unit-price
+  - "100"
+  - --expiration-timestamp
+  - "9999999999"

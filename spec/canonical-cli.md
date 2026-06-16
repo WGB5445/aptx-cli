@@ -1,70 +1,109 @@
 # Canonical CLI Spec
 
-Implemented command shape:
+This is the authoritative contract that all language implementations must conform to. Changes here must be reflected in every active implementation and in the conformance test cases.
 
-```text
-aptx simulate <txn-type>
-aptx submit <txn-type>
-aptx run <txn-type>
-aptx inspect
+## Command shape
+
+```
+aptx simulate <txn-type>   # build and simulate; no signing required
+aptx submit  <txn-type>    # build, sign, and submit to network
+aptx run     <txn-type>    # simulate + submit in one step
+aptx inspect               # decode and display an existing transaction
 ```
 
-Implemented transaction types:
+## Transaction types
 
-- `single`
-- `multi-agent`
-- `multi-key`
-- `multi-sig`
+| Type | Description |
+|---|---|
+| `single` | Standard single-signer transaction |
+| `multi-agent` | Transaction with multiple authorized signers |
+| `multi-key` | M-of-N multisignature using MultiKey account |
+| `multi-sig` | On-chain multisig account transaction |
 
-Currently implemented flags across all language versions:
+## Flags
 
-- `--input`
-- `--input-format`
-- `--output`
-- `--output-format`
-- `--artifacts-dir`
-- `--network`
-- `--function`
-- `--arg`
-- `--type-arg`
-- `--sender-address`
-- `--private-key`
-- `--private-key-env`
-- `--private-key-file`
-- `--profile`
-- `--no-sign`
-- `--no-abi`
-- `--verbose`
-- `--quiet`
-- `--sdk-mode`
-- `--multisig-action`
-- `--multisig-address`
-- `--multisig-owner-address`
-- `--multisig-threshold`
-- `--multisig-sequence`
-- `--multisig-hash-only`
-- `--multi-key-public-key`
-- `--multi-key-signer`
-- `--multi-key-threshold`
+All implementations must accept these flags:
 
-Argument modes:
+**Input / output**
 
-- parsed: `<type>:<value>`
-- raw serialized: `raw:<hex>`
+| Flag | Description |
+|---|---|
+| `--input FILE` | Load transaction parameters from JSON or YAML file |
+| `--input-format json\|yaml` | Override input format detection |
+| `--output FILE` | Write result to file (default: stdout) |
+| `--output-format json\|yaml\|table` | Output format (default: json when writing to file, table to stdout) |
+| `--artifacts-dir DIR` | Save transaction artifacts to this directory |
 
-Shared behavioral rules:
+**Network and function**
 
-- `raw:<hex>` requires ABI mode to be enabled
-- `submit` requires signer material unless `--sdk-mode mock` and `--no-sign` are both used for dry validation
-- output defaults to JSON when writing to a file and table when writing to stdout
-- all implementations emit the same JSON shape for conformance
-- `multi-sig` uses `--multisig-action` to select one of `create-account`, `propose`, `approve`, or `execute`
-- `multi-sig propose` and `multi-sig execute` currently support entry-function payloads; script payloads are not supported
-- `multi-key` uses `--multi-key-public-key` to define the N-key set, `--multi-key-threshold` to define M, and `--multi-key-signer <index>:<private-key>` to select the M signers used for submission
+| Flag | Description |
+|---|---|
+| `--network NAME` | Target network (mainnet, testnet, devnet, local) |
+| `--function ADDRESS::MODULE::NAME` | Move entry function to call |
+| `--arg TYPE:VALUE` | Transaction argument in parsed form (repeatable) |
+| `--type-arg TYPE` | Move type argument (repeatable) |
 
-Target SDK mappings:
+**Signer identity**
 
-- TypeScript implementation: `@aptos-labs/ts-sdk`
-- Python implementation: `aptos-python-sdk`
-- Go implementation: `github.com/aptos-labs/aptos-go-sdk`
-- Rust implementation: `https://github.com/aptos-labs/aptos-rust-sdk`
+| Flag | Description |
+|---|---|
+| `--sender-address ADDRESS` | Sender account address |
+| `--private-key HEX` | Private key (inline) |
+| `--private-key-env VAR` | Read private key from environment variable |
+| `--private-key-file FILE` | Read private key from file |
+| `--profile NAME` | Load key and address from Aptos CLI profile |
+| `--no-sign` | Skip signing (for dry-run or address-only simulation) |
+
+**Behavior**
+
+| Flag | Description |
+|---|---|
+| `--no-abi` | Disable ABI resolution |
+| `--verbose` | Verbose output |
+| `--quiet` | Suppress informational output |
+| `--sdk-mode mock\|real` | Force mock (for conformance) or real SDK mode |
+
+**Multi-sig flags**
+
+| Flag | Description |
+|---|---|
+| `--multisig-action create-account\|propose\|approve\|execute` | On-chain multisig action |
+| `--multisig-address ADDRESS` | On-chain multisig account address |
+| `--multisig-owner-address ADDRESS` | Owner addresses for `create-account` (repeatable) |
+| `--multisig-threshold N` | Approval threshold |
+| `--multisig-sequence N` | Sequence number for `approve` |
+| `--multisig-hash-only` | Include only the payload hash, not the full payload |
+
+**Multi-key flags**
+
+| Flag | Description |
+|---|---|
+| `--multi-key-public-key HEX` | Public keys in the N-key set (repeatable) |
+| `--multi-key-signer INDEX:KEY` | Signer specification: index and private key (repeatable) |
+| `--multi-key-threshold N` | Number of required signatures (M in M-of-N) |
+
+## Argument format
+
+- Parsed: `<type>:<value>` — e.g. `address:0x1`, `u64:1000`, `bool:true`
+- Raw serialized: `raw:<hex>` — requires ABI mode to be enabled
+
+## Behavioral rules
+
+- `raw:<hex>` requires `--no-abi` to be absent (ABI mode must be on)
+- `submit` requires signer material unless `--sdk-mode mock --no-sign` is used
+- Output defaults to JSON when `--output FILE` is used, table when writing to stdout
+- All implementations emit the same JSON shape; see [`output-schema.json`](output-schema.json) for the formal definition
+- `multi-sig propose` and `execute` support entry-function payloads; script payloads are not currently supported
+
+## Output schema
+
+The normalized conformance projection that all implementations must produce is defined in [`spec/output-schema.json`](output-schema.json). The conformance runner (`conformance/run.py`) extracts this projection from each implementation's full JSON output and compares them.
+
+## SDK targets
+
+| Implementation | SDK |
+|---|---|
+| TypeScript | `@aptos-labs/ts-sdk` |
+| Python | `aptos-python-sdk` |
+| Go | `github.com/aptos-labs/aptos-go-sdk` |
+| Rust | `aptos-rust-sdk` |

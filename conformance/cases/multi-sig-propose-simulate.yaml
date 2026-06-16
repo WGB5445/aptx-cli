@@ -1,0 +1,20 @@
+name: multi-sig-propose-simulate
+description: Simulate a multi-sig propose transaction with inline flags
+implementations: [typescript, python, go, rust]
+argv:
+  - simulate
+  - multi-sig
+  - --network
+  - testnet
+  - --multisig-action
+  - propose
+  - --multisig-address
+  - "0xabc"
+  - --function
+  - "0x1::aptos_account::transfer"
+  - --sender-address
+  - "0x111"
+  - --arg
+  - "address:0x333"
+  - --arg
+  - "u64:1000"

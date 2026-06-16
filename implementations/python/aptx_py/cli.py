@@ -160,15 +160,17 @@ def render_ascii(payload):
 
 def parse_cli(argv):
     if len(argv) < 1:
-        raise ValueError("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]")
+        raise ValueError("usage: aptx <simulate|submit|run|inspect|encode|decode|sign> <txn-type> [flags]")
     action = argv[0]
-    if action == "inspect":
+    no_txn_type_actions = {"inspect", "decode", "sign"}
+    if action in no_txn_type_actions:
         txn_type = "single"
+        start = 1
     elif len(argv) >= 2:
         txn_type = argv[1]
+        start = 2
     else:
-        raise ValueError("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]")
-    start = 1 if action == "inspect" else 2
+        raise ValueError("usage: aptx <simulate|submit|run|inspect|encode|decode|sign> <txn-type> [flags]")
     state = {
         "action": action,
         "txn_type": txn_type,
@@ -209,6 +211,14 @@ def parse_cli(argv):
         "verbose": False,
         "quiet": False,
         "sdk_mode": "mock",
+        "sequence_number": 0,
+        "chain_id": 4,
+        "max_gas_amount": 200_000,
+        "gas_unit_price": 100,
+        "expiration_timestamp": 9_999_999_999,
+        "nonce": None,
+        "input_bcs": None,
+        "fee_payer_address": None,
     }
     i = start
     while i < len(argv):
@@ -313,6 +323,22 @@ def parse_cli(argv):
         elif arg == "--sdk-mode":
             state["sdk_mode"] = nxt or "mock"
             i += 2
+        elif arg == "--sequence-number":
+            state["sequence_number"] = int(argv[i + 1]); i += 2
+        elif arg == "--chain-id":
+            state["chain_id"] = int(argv[i + 1]); i += 2
+        elif arg == "--max-gas-amount":
+            state["max_gas_amount"] = int(argv[i + 1]); i += 2
+        elif arg == "--gas-unit-price":
+            state["gas_unit_price"] = int(argv[i + 1]); i += 2
+        elif arg == "--expiration-timestamp":
+            state["expiration_timestamp"] = int(argv[i + 1]); i += 2
+        elif arg == "--nonce":
+            state["nonce"] = argv[i + 1]; i += 2
+        elif arg == "--input-bcs":
+            state["input_bcs"] = argv[i + 1]; i += 2
+        elif arg == "--fee-payer-address":
+            state["fee_payer_address"] = argv[i + 1]; i += 2
         elif arg == "--no-sign":
             state["no_sign"] = True
             i += 1
@@ -330,6 +356,181 @@ def parse_cli(argv):
     return state
 
 
+def _bcs_encode_arg(arg_str):
+    """BCS-encode a single 'type:value' arg string, return bytes."""
+    from aptos_sdk.bcs import Serializer
+    from aptos_sdk.account_address import AccountAddress
+
+    if arg_str.startswith("raw:"):
+        return bytes.fromhex(arg_str[4:].lstrip("0x"))
+
+    idx = arg_str.index(":")
+    kind = arg_str[:idx]
+    val = arg_str[idx + 1:]
+
+    ser = Serializer()
+    if kind == "u8":
+        ser.u8(int(val))
+    elif kind == "u16":
+        ser.u16(int(val))
+    elif kind == "u32":
+        ser.u32(int(val))
+    elif kind == "u64":
+        ser.u64(int(val))
+    elif kind == "u128":
+        ser.u128(int(val))
+    elif kind == "bool":
+        ser.bool(val == "true")
+    elif kind == "address":
+        addr = AccountAddress.from_str_relaxed(val)
+        addr.serialize(ser)
+    elif kind == "string":
+        ser.str(val)
+    else:
+        raise ValueError(f"unsupported arg type: {kind}")
+    return ser.output()
+
+
+def run_encode(state, spec):
+    from aptos_sdk.transactions import RawTransaction, TransactionPayload, EntryFunction, TransactionArgument
+    from aptos_sdk.account_address import AccountAddress
+    from aptos_sdk.bcs import Serializer
+
+    sender = AccountAddress.from_str_relaxed(spec["sender_address"])
+    function_str = spec.get("function", "")
+    parts = function_str.split("::")
+    if len(parts) != 3:
+        raise ValueError(f"invalid function: {function_str}")
+
+    # EntryFunction.natural takes "address::module", "function", type_tags, args (as TransactionArguments)
+    # We BCS-encode each arg manually and pass as raw bytes via TransactionArgument with a bytes encoder
+    raw_args = [_bcs_encode_arg(a) for a in spec.get("args", [])]
+    # TransactionArgument wraps (value, encoder); for pre-encoded bytes use fixed_bytes (no length prefix)
+    tx_args = [TransactionArgument(b, lambda ser, v: ser.fixed_bytes(v)) for b in raw_args]
+    type_args = []  # type args not yet supported in encode subcommand
+
+    module_id_str = f"{parts[0]}::{parts[1]}"
+    ef = EntryFunction.natural(module_id_str, parts[2], type_args, tx_args)
+    payload = TransactionPayload(ef)
+
+    seq_num = state.get("sequence_number", 0)
+    chain_id = state.get("chain_id", 4)
+    max_gas = state.get("max_gas_amount", 200_000)
+    gas_price = state.get("gas_unit_price", 100)
+    expiration = state.get("expiration_timestamp", 9_999_999_999)
+
+    raw_txn = RawTransaction(
+        sender=sender,
+        sequence_number=seq_num,
+        payload=payload,
+        max_gas_amount=max_gas,
+        gas_unit_price=gas_price,
+        expiration_timestamps_secs=expiration,
+        chain_id=chain_id,
+    )
+
+    ser = Serializer()
+    raw_txn.serialize(ser)
+    bcs_hex = "0x" + ser.output().hex()
+
+    return {
+        "action": "encode",
+        "txn_type": spec.get("txn_type", "single"),
+        "bcs": bcs_hex,
+        "sender": spec["sender_address"],
+        "function": function_str,
+        "chain_id": chain_id,
+        "sequence_number": seq_num,
+        "max_gas_amount": max_gas,
+        "gas_unit_price": gas_price,
+        "expiration_timestamp": expiration,
+    }
+
+
+def run_decode(state):
+    from aptos_sdk.transactions import RawTransaction, EntryFunction
+    from aptos_sdk.bcs import Deserializer
+
+    input_bcs = state.get("input_bcs", "")
+    if not input_bcs:
+        raise ValueError("decode requires --input-bcs <hex>")
+
+    hex_str = input_bcs[2:] if input_bcs.startswith("0x") else input_bcs
+    bcs_bytes = bytes.fromhex(hex_str)
+    des = Deserializer(bcs_bytes)
+    raw_txn = RawTransaction.deserialize(des)
+
+    fn = ""
+    try:
+        ef = raw_txn.payload.value  # TransactionPayload.value is the inner EntryFunction
+        if isinstance(ef, EntryFunction):
+            fn = f"{ef.module.address}::{ef.module.name}::{ef.function}"
+    except Exception:
+        pass
+
+    MAX_U64 = 2 ** 64 - 1
+    is_orderless = raw_txn.sequence_number == MAX_U64
+
+    return {
+        "action": "decode",
+        "txn_type": "orderless" if is_orderless else "single",
+        "sender": str(raw_txn.sender),
+        "function": fn,
+        "chain_id": raw_txn.chain_id,
+        "sequence_number": "max_u64" if is_orderless else raw_txn.sequence_number,
+        "max_gas_amount": raw_txn.max_gas_amount,
+        "gas_unit_price": raw_txn.gas_unit_price,
+        "expiration_timestamp": raw_txn.expiration_timestamps_secs,
+        "is_orderless": is_orderless,
+    }
+
+
+def run_sign(state):
+    from aptos_sdk.transactions import RawTransaction, SignedTransaction, AccountAuthenticator
+    from aptos_sdk.bcs import Deserializer, Serializer
+    from aptos_sdk import ed25519
+
+    input_bcs = state.get("input_bcs", "")
+    if not input_bcs:
+        raise ValueError("sign requires --input-bcs <hex>")
+
+    private_key_hex = state.get("private_key", "")
+    if not private_key_hex:
+        raise ValueError("sign requires --private-key <hex>")
+
+    hex_str = input_bcs[2:] if input_bcs.startswith("0x") else input_bcs
+    bcs_bytes = bytes.fromhex(hex_str)
+    des = Deserializer(bcs_bytes)
+    raw_txn = RawTransaction.deserialize(des)
+
+    privkey_hex = private_key_hex
+    for prefix in ("ed25519-priv-", "0x"):
+        privkey_hex = privkey_hex.replace(prefix, "", 1)
+    privkey_bytes = bytes.fromhex(privkey_hex)
+
+    from nacl.signing import SigningKey as NaclSigningKey
+    private_key = ed25519.PrivateKey(NaclSigningKey(privkey_bytes))
+
+    # sign() returns an AccountAuthenticator; we then wrap in SignedTransaction
+    auth = raw_txn.sign(private_key)
+    signed_txn = SignedTransaction(raw_txn, auth)
+
+    ser = Serializer()
+    signed_txn.serialize(ser)
+
+    signature = private_key.sign(raw_txn.keyed())
+    pub_key_hex = "0x" + private_key.public_key().key.encode().hex()
+    sig_hex = "0x" + signature.data().hex()
+
+    return {
+        "action": "sign",
+        "txn_type": "single",
+        "public_key": pub_key_hex,
+        "signature": sig_hex,
+        "signed_bcs": "0x" + ser.output().hex(),
+    }
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
@@ -337,6 +538,7 @@ def main(argv=None):
         input_format = detect_format(state["input"], state["input_format"], "json")
         file_input = load_input(state["input"], input_format)
         spec = {
+            "txn_type": state["txn_type"],
             "network": state["network"] or file_input.get("network", "testnet"),
             "function": state["function"] or file_input.get("function", ""),
             "script_hex": state["script_hex"] or file_input.get("script_hex", ""),
@@ -372,6 +574,20 @@ def main(argv=None):
             if state["multi_key_threshold"] is not None
             else file_input.get("multi_key_threshold", 0),
         }
+        # Early dispatch for encode / decode / sign — bypass standard simulation machinery
+        if state["action"] == "encode":
+            result = run_encode(state, spec)
+            print(json.dumps(result, indent=2))
+            return 0
+        elif state["action"] == "decode":
+            result = run_decode(state)
+            print(json.dumps(result, indent=2))
+            return 0
+        elif state["action"] == "sign":
+            result = run_sign(state)
+            print(json.dumps(result, indent=2))
+            return 0
+
         if state["action"] != "inspect" and not spec["function"] and not spec["script_hex"] and state["txn_type"] != "multi-sig":
             return fail("missing function")
         if state["txn_type"] not in {"single", "multi-agent", "multi-key", "multi-sig"}:
@@ -419,6 +635,7 @@ def main(argv=None):
             ]
         )
         digest = stable_digest(seed)
+        result_mode = "simulate" if state["action"] == "run" and spec["no_sign"] else state["action"]
         payload = {
             "cli": "aptx",
             "implementation": "python",
@@ -454,16 +671,34 @@ def main(argv=None):
                 "redacted": True,
             },
             "result": {
-                "mode": "simulate" if state["action"] == "run" and spec["no_sign"] else state["action"],
+                "mode": result_mode,
                 "success": True,
                 "vm_status": "Executed successfully",
                 "tx_hash": f"0x{digest[:32]}",
                 "gas_used": len(spec["function"]) + len(spec["args"]) * 111 + len(spec["type_args"]) * 37,
-                "notes": ["mock backend active", "sdk integration point reserved"]
-                if state["sdk_mode"] == "mock"
-                else ["sdk backend requested"],
+                "notes": ["mock backend active"] if state["sdk_mode"] == "mock" else [],
             },
         }
+
+        # Real SDK path: call aptos-sdk when not in mock mode
+        if state["sdk_mode"] != "mock" and state["action"] in {"simulate", "run"}:
+            try:
+                from aptx_py import sdk as _sdk
+                sim = _sdk.simulate(state["txn_type"], spec, state)
+                payload["sdk_backend"] = "aptos-sdk (real)"
+                payload["result"].update({
+                    "success": sim.success,
+                    "vm_status": sim.vm_status,
+                    "gas_used": sim.gas_used,
+                    "tx_hash": sim.tx_hash,
+                    "notes": [],
+                })
+            except ImportError as exc:
+                payload["result"]["notes"] = [str(exc)]
+            except NotImplementedError as exc:
+                payload["result"]["notes"] = [f"not implemented: {exc}"]
+            except Exception as exc:
+                payload["result"]["notes"] = [f"sdk error: {exc}"]
         artifacts_dir = state["artifacts_dir"]
         if artifacts_dir:
             Path(artifacts_dir).mkdir(parents=True, exist_ok=True)
