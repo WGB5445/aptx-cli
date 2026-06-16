@@ -1184,6 +1184,7 @@ func runReal(state State, spec InputSpec) (map[string]any, error) {
 			senderAddress,
 			txnPayload,
 			aptos.AdditionalSigners(secondaryAddresses),
+			aptos.MaxGasAmount(state.MaxGasAmount),
 		)
 		if err != nil {
 			return nil, err
@@ -1193,7 +1194,7 @@ func runReal(state State, spec InputSpec) (map[string]any, error) {
 			return nil, err
 		}
 	} else {
-		rawTxn, err = client.BuildTransaction(senderAddress, txnPayload)
+		rawTxn, err = client.BuildTransaction(senderAddress, txnPayload, aptos.MaxGasAmount(state.MaxGasAmount))
 		if err != nil {
 			return nil, err
 		}
