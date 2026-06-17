@@ -51,7 +51,17 @@ IMPLEMENTATIONS = {
         "-m",
         "aptx_py",
     ],
+    "python-v2": [
+        "python3",
+        "-m",
+        "aptx_py_v2",
+    ],
     "go": [
+        "go",
+        "run",
+        "./cmd/aptx",
+    ],
+    "go-v2": [
         "go",
         "run",
         "./cmd/aptx",
@@ -174,6 +184,29 @@ def read_sdk_versions() -> dict:
                 versions["python"] = stripped
                 break
 
+    # Go v2: aptos-go-sdk/v2 from go-v2/go.mod
+    go_v2_mod = ROOT / "implementations" / "go-v2" / "go.mod"
+    versions["go-v2"] = None
+    if go_v2_mod.exists():
+        for line in go_v2_mod.read_text().splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 3 and parts[0] == "require" and parts[1] == "github.com/aptos-labs/aptos-go-sdk/v2":
+                versions["go-v2"] = parts[2]
+                break
+            if len(parts) >= 2 and parts[0] == "github.com/aptos-labs/aptos-go-sdk/v2":
+                versions["go-v2"] = parts[1]
+                break
+
+    # Python v2: aptos-sdk-v2 from python-v2/pyproject.toml
+    py_v2_toml = ROOT / "implementations" / "python-v2" / "pyproject.toml"
+    versions["python-v2"] = None
+    if py_v2_toml.exists():
+        for line in py_v2_toml.read_text().splitlines():
+            stripped = line.strip().strip('",')
+            if stripped.startswith("aptos-sdk-v2"):
+                versions["python-v2"] = stripped
+                break
+
     # Rust: aptos-sdk from Cargo.toml
     cargo_toml = ROOT / "implementations" / "rust" / "Cargo.toml"
     versions["rust"] = None
@@ -217,8 +250,15 @@ def run_impl(name: str, case: dict) -> dict:
 
     if name == "python":
         cwd = ROOT / "implementations" / "python"
+    elif name == "python-v2":
+        cwd = ROOT / "implementations" / "python-v2"
     elif name == "go":
         cwd = ROOT / "implementations" / "go"
+        cache_dir = ROOT / ".cache" / "go-build"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        env["GOCACHE"] = str(cache_dir)
+    elif name == "go-v2":
+        cwd = ROOT / "implementations" / "go-v2"
         cache_dir = ROOT / ".cache" / "go-build"
         cache_dir.mkdir(parents=True, exist_ok=True)
         env["GOCACHE"] = str(cache_dir)

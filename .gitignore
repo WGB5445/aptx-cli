@@ -13,3 +13,4 @@ implementations/python/.venv_pkgs/
 bin/
 target/
 implementations/go/aptx
+implementations/go-v2/aptx

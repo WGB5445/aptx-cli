@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aptx-python-v2"
+version = "0.1.0"
+description = "Python v2 implementation of the aptx CLI targeting aptos-sdk-v2"
+requires-python = ">=3.12"
+dependencies = [
+    "aptos-sdk-v2",
+]
+
+[tool.setuptools]
+packages = ["aptx_py_v2"]
