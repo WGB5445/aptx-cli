@@ -1,6 +1,6 @@
 name: single-simulate
 description: Simulate a single transfer transaction loaded from a JSON fixture
-implementations: [typescript, python, go, rust]
+implementations: [typescript, python, python-v2, go, go-v2, rust]
 argv:
   - simulate
   - single

@@ -1,6 +1,6 @@
 name: encode-single
 description: All 4 SDKs encode the same single transfer transaction — BCS bytes must match exactly
-implementations: [typescript, python, go, rust]
+implementations: [typescript, python, python-v2, go, go-v2, rust]
 argv:
   - encode
   - single

@@ -1,6 +1,6 @@
 name: decode-single
 description: All 4 SDKs decode the same BCS hex back to matching transaction fields
-implementations: [typescript, python, go, rust]
+implementations: [typescript, python, python-v2, go, go-v2, rust]
 argv:
   - decode
   - --input-bcs

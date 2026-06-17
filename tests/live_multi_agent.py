@@ -14,6 +14,9 @@ from typing import Dict, List, Optional
 ROOT = Path(__file__).resolve().parent.parent
 TS_DIR = ROOT / "implementations" / "typescript"
 GO_DIR = ROOT / "implementations" / "go"
+GO_V2_DIR = ROOT / "implementations" / "go-v2"
+PY_DIR = ROOT / "implementations" / "python"
+PY_V2_DIR = ROOT / "implementations" / "python-v2"
 TEST_NETWORK = os.environ.get("APTX_TEST_NETWORK", "devnet").lower()
 TEST_FULLNODE = os.environ.get("APTX_TEST_FULLNODE", "")
 TEST_FAUCET = os.environ.get("APTX_TEST_FAUCET", "")
@@ -283,6 +286,66 @@ def run_go(accounts: dict) -> None:
     assert_success(run_payload, "go", "run")
 
 
+def run_python(accounts: dict) -> None:
+    """Python v1 real SDK — simulate only (multi-agent is primary-signer only)."""
+    env = os.environ.copy()
+    simulate_cmd = [
+        "python3", "-m", "aptx_py",
+        "simulate", "multi-agent",
+        *base_multi_agent_args(accounts),
+        "--output-format", "json",
+    ]
+    simulate_payload = json.loads(run_cmd(simulate_cmd, cwd=PY_DIR, env=env).stdout)
+    if simulate_payload["implementation"] != "python":
+        raise AssertionError(f"unexpected implementation: {simulate_payload['implementation']}")
+    if simulate_payload["result"]["success"] is not True:
+        raise AssertionError(f"python simulate success mismatch: {simulate_payload['result']}")
+
+
+def run_python_v2(accounts: dict) -> None:
+    """Python v2 real SDK — simulate only (multi-agent is primary-signer only)."""
+    env = os.environ.copy()
+    simulate_cmd = [
+        "python3", "-m", "aptx_py_v2",
+        "simulate", "multi-agent",
+        *base_multi_agent_args(accounts),
+        "--output-format", "json",
+    ]
+    simulate_payload = json.loads(run_cmd(simulate_cmd, cwd=PY_V2_DIR, env=env).stdout)
+    if simulate_payload["implementation"] != "python-v2":
+        raise AssertionError(f"unexpected implementation: {simulate_payload['implementation']}")
+    if simulate_payload["result"]["success"] is not True:
+        raise AssertionError(f"python-v2 simulate success mismatch: {simulate_payload['result']}")
+
+
+def run_go_v2(accounts: dict) -> None:
+    """Go v2 real SDK — simulate + run (full multi-agent signing)."""
+    env = os.environ.copy()
+    env["GOCACHE"] = str(ROOT / ".cache" / "go-build")
+    env["GOMODCACHE"] = str(ROOT / ".cache" / "go-mod")
+
+    simulate_cmd = [
+        "go", "run", "./cmd/aptx",
+        "simulate", "multi-agent",
+        *base_multi_agent_args(accounts),
+        "--public-key", accounts["sender"]["publicKey"],
+        "--output-format", "json",
+    ]
+    simulate_payload = json.loads(run_cmd(simulate_cmd, cwd=GO_V2_DIR, env=env).stdout)
+    assert_success(simulate_payload, "go-v2", "simulate")
+
+    run_cmd_args = [
+        "go", "run", "./cmd/aptx",
+        "run", "multi-agent",
+        *base_multi_agent_args(accounts),
+        "--private-key", accounts["sender"]["privateKey"],
+        "--secondary-private-key", accounts["secondary"]["privateKey"],
+        "--output-format", "json",
+    ]
+    run_payload = json.loads(run_cmd(run_cmd_args, cwd=GO_V2_DIR, env=env).stdout)
+    assert_success(run_payload, "go-v2", "run")
+
+
 def main() -> int:
     if os.environ.get("APTX_SKIP_LIVE") == "1":
         print(json.dumps({"status": "skipped", "reason": "APTX_SKIP_LIVE=1"}, indent=2))
@@ -291,7 +354,13 @@ def main() -> int:
     accounts = provision_accounts()
     run_typescript(accounts)
     run_go(accounts)
-    print(json.dumps({"status": "ok", "tested": ["typescript", "typescript-deno", "go"]}, indent=2))
+    run_go_v2(accounts)
+    run_python(accounts)
+    run_python_v2(accounts)
+    print(json.dumps({
+        "status": "ok",
+        "tested": ["typescript", "typescript-deno", "go", "go-v2", "python", "python-v2"],
+    }, indent=2))
     return 0
 
 

@@ -66,6 +66,9 @@ type State struct {
 	MultisigThreshold        int
 	MultisigSequence         int
 	MultisigHashOnly         bool
+	MultiKeyPublicKeys       []string
+	MultiKeyThreshold        int
+	MultiKeySigners          []string
 	NoSign                   bool
 	ABIEnabled               bool
 	Verbose                  bool
@@ -99,6 +102,8 @@ type InputSpec struct {
 	MultisigThreshold        int      `json:"multisig_threshold"`
 	MultisigSequence         int      `json:"multisig_sequence"`
 	MultisigHashOnly         bool     `json:"multisig_hash_only"`
+	MultiKeyPublicKeys       []string `json:"multi_key_public_keys"`
+	MultiKeyThreshold        int      `json:"multi_key_threshold"`
 }
 
 type AbiSummary struct {
@@ -455,6 +460,8 @@ func run(argv []string) error {
 		MultisigThreshold:        firstNonZero(state.MultisigThreshold, asInt(fileInput["multisig_threshold"], 0)),
 		MultisigSequence:         firstNonZero(state.MultisigSequence, asInt(fileInput["multisig_sequence"], 0)),
 		MultisigHashOnly:         state.MultisigHashOnly || asBool(fileInput["multisig_hash_only"], false),
+		MultiKeyPublicKeys:       firstNonEmptySlice(state.MultiKeyPublicKeys, asStringSlice(fileInput["multi_key_public_keys"])),
+		MultiKeyThreshold:        firstNonZero(state.MultiKeyThreshold, asInt(fileInput["multi_key_threshold"], 0)),
 	}
 
 	if err := requireValidState(state, spec); err != nil {
@@ -1022,6 +1029,8 @@ func parseCLI(argv []string) (State, error) {
 		SecondaryPrivateKeys:     []string{},
 		SecondaryPublicKeys:      []string{},
 		MultisigOwnerAddresses:   []string{},
+		MultiKeyPublicKeys:       []string{},
+		MultiKeySigners:          []string{},
 		ABIEnabled:               true,
 		SDKMode:                  "sdk",
 	}
@@ -1126,6 +1135,19 @@ func parseCLI(argv []string) (State, error) {
 			i++
 		case "--multisig-hash-only":
 			state.MultisigHashOnly = true
+		case "--multi-key-public-key":
+			state.MultiKeyPublicKeys = append(state.MultiKeyPublicKeys, next)
+			i++
+		case "--multi-key-threshold":
+			n, err := strconv.Atoi(next)
+			if err != nil {
+				return State{}, fmt.Errorf("invalid --multi-key-threshold: %w", err)
+			}
+			state.MultiKeyThreshold = n
+			i++
+		case "--multi-key-signer":
+			state.MultiKeySigners = append(state.MultiKeySigners, next)
+			i++
 		case "--sdk-mode":
 			state.SDKMode = next
 			i++
@@ -1192,14 +1214,23 @@ func requireValidState(state State, spec InputSpec) error {
 	if spec.Function == "" && spec.ScriptHex == "" && state.TxnType != "multi-sig" {
 		return errors.New("missing function or --script-hex")
 	}
-	if state.TxnType != "single" && state.TxnType != "multi-agent" {
-		return fmt.Errorf("%s is not implemented yet in the go-v2 backend", state.TxnType)
+	// multi-key and multi-sig are mock-only in go-v2 for now; real SDK path not yet implemented.
+	if state.SDKMode != "mock" && state.TxnType != "single" && state.TxnType != "multi-agent" {
+		return fmt.Errorf("%s real SDK path is not yet implemented in go-v2; use --sdk-mode mock", state.TxnType)
 	}
-	if state.TxnType == "multi-agent" && len(spec.SecondarySignerAddresses) == 0 {
+	if state.TxnType == "multi-agent" && state.SDKMode != "mock" && len(spec.SecondarySignerAddresses) == 0 {
 		return errors.New("multi-agent requires at least one --secondary-signer-address")
 	}
+	if state.TxnType == "multi-key" {
+		if spec.MultiKeyThreshold < 1 {
+			return errors.New("multi-key requires --multi-key-threshold >= 1")
+		}
+		if len(spec.MultiKeyPublicKeys) < spec.MultiKeyThreshold {
+			return errors.New("multi-key threshold cannot exceed public key count")
+		}
+	}
 	signMode := signingMode(state)
-	if (state.Action == "submit" || (state.Action == "run" && !spec.NoSign)) && signMode == "none" {
+	if (state.Action == "submit" || (state.Action == "run" && !spec.NoSign)) && signMode == "none" && state.SDKMode != "mock" {
 		return errors.New("submit requires signing material")
 	}
 	return nil
@@ -1233,6 +1264,8 @@ func runMock(state State, spec InputSpec) (map[string]any, error) {
 		strconv.Itoa(spec.MultisigThreshold),
 		strconv.Itoa(spec.MultisigSequence),
 		strconv.FormatBool(spec.MultisigHashOnly),
+		strings.Join(spec.MultiKeyPublicKeys, ","),
+		strconv.Itoa(spec.MultiKeyThreshold),
 		strconv.FormatBool(spec.ABIEnabled),
 		signMode,
 	}, "|")
@@ -1260,6 +1293,8 @@ func runMock(state State, spec InputSpec) (map[string]any, error) {
 			"multisig_threshold":         spec.MultisigThreshold,
 			"multisig_sequence":          spec.MultisigSequence,
 			"multisig_hash_only":         spec.MultisigHashOnly,
+			"multi_key_public_keys":      spec.MultiKeyPublicKeys,
+			"multi_key_threshold":        spec.MultiKeyThreshold,
 			"hash":                       spec.Hash,
 			"fullnode":                   spec.Fullnode,
 		},

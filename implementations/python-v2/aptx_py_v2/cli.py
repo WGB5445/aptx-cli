@@ -358,8 +358,8 @@ def parse_cli(argv):
 
 def _bcs_encode_arg(arg_str):
     """BCS-encode a single 'type:value' arg string, return bytes."""
-    from aptos_sdk_v2.bcs import Serializer
-    from aptos_sdk_v2.types.account_address import AccountAddress
+    from aptos_sdk.bcs import Serializer
+    from aptos_sdk.account_address import AccountAddress
 
     if arg_str.startswith("raw:"):
         return bytes.fromhex(arg_str[4:].lstrip("0x"))
@@ -392,10 +392,9 @@ def _bcs_encode_arg(arg_str):
 
 
 def run_encode(state, spec):
-    from aptos_sdk_v2.transactions.raw_transaction import RawTransaction
-    from aptos_sdk_v2.transactions.payload import TransactionPayload, EntryFunction, TransactionArgument
-    from aptos_sdk_v2.types.account_address import AccountAddress
-    from aptos_sdk_v2.bcs import Serializer
+    from aptos_sdk.transactions import RawTransaction, TransactionPayload, EntryFunction, TransactionArgument
+    from aptos_sdk.account_address import AccountAddress
+    from aptos_sdk.bcs import Serializer
 
     sender = AccountAddress.from_str_relaxed(spec["sender_address"])
     function_str = spec.get("function", "")
@@ -446,9 +445,8 @@ def run_encode(state, spec):
 
 
 def run_decode(state):
-    from aptos_sdk_v2.transactions.raw_transaction import RawTransaction
-    from aptos_sdk_v2.transactions.payload import EntryFunction
-    from aptos_sdk_v2.bcs import Deserializer
+    from aptos_sdk.transactions import RawTransaction, EntryFunction
+    from aptos_sdk.bcs import Deserializer
 
     input_bcs = state.get("input_bcs", "")
     if not input_bcs:
@@ -485,11 +483,9 @@ def run_decode(state):
 
 
 def run_sign(state):
-    from aptos_sdk_v2.transactions.raw_transaction import RawTransaction
-    from aptos_sdk_v2.transactions.signed_transaction import SignedTransaction
-    from aptos_sdk_v2.transactions.authenticator import Ed25519Authenticator
-    from aptos_sdk_v2.bcs import Deserializer
-    from aptos_sdk_v2.crypto.ed25519 import Ed25519PrivateKey
+    from aptos_sdk.transactions import RawTransaction, SignedTransaction, AccountAuthenticator
+    from aptos_sdk.bcs import Deserializer, Serializer
+    from aptos_sdk import ed25519
 
     input_bcs = state.get("input_bcs", "")
     if not input_bcs:
@@ -507,23 +503,27 @@ def run_sign(state):
     privkey_hex = private_key_hex
     for prefix in ("ed25519-priv-", "0x"):
         privkey_hex = privkey_hex.replace(prefix, "", 1)
+    privkey_bytes = bytes.fromhex(privkey_hex)
 
-    private_key = Ed25519PrivateKey.from_str(privkey_hex)
+    from nacl.signing import SigningKey as NaclSigningKey
+    private_key = ed25519.PrivateKey(NaclSigningKey(privkey_bytes))
 
     auth = raw_txn.sign(private_key)
     signed_txn = SignedTransaction(raw_txn, auth)
-    signed_bytes = signed_txn.to_bytes()
 
-    ed_auth = auth.authenticator
-    pub_key_hex = "0x" + ed_auth.public_key._key.encode().hex()
-    sig_hex = "0x" + ed_auth.signature._signature.hex()
+    ser = Serializer()
+    signed_txn.serialize(ser)
+
+    signature = private_key.sign(raw_txn.keyed())
+    pub_key_hex = "0x" + private_key.public_key().key.encode().hex()
+    sig_hex = "0x" + signature.data().hex()
 
     return {
         "action": "sign",
         "txn_type": "single",
         "public_key": pub_key_hex,
         "signature": sig_hex,
-        "signed_bcs": "0x" + signed_bytes.hex(),
+        "signed_bcs": "0x" + ser.output().hex(),
     }
 
 

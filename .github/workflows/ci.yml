@@ -49,7 +49,7 @@ jobs:
         run: pip install -e .
 
       - name: Install conformance dependencies
-        run: pip install pyyaml
+        run: pip install pyyaml pytest
 
       - name: TypeScript typecheck
         working-directory: implementations/typescript
@@ -71,6 +71,19 @@ jobs:
 
       - name: Shared mock conformance
         run: python3 conformance/run.py
+
+      - name: Python v1 unit tests
+        run: python3 -m pytest implementations/python/tests/ -v
+
+      - name: Python v2 unit tests
+        run: python3 -m pytest implementations/python-v2/tests/ -v
+
+      - name: Go v2 offline/mock integration tests
+        working-directory: implementations/go-v2
+        env:
+          GOCACHE: ${{ github.workspace }}/.cache/go-build
+          GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
+        run: go test ./integration -run 'TestCLIMockConformance|TestOfflineEncodeDecode|TestOfflineSign' -v
 
   localnet-live:
     runs-on: ubuntu-latest
@@ -108,6 +121,14 @@ jobs:
       - name: Install TypeScript dependencies
         working-directory: implementations/typescript
         run: pnpm install --frozen-lockfile
+
+      - name: Install Python implementation
+        working-directory: implementations/python
+        run: pip install -e .
+
+      - name: Install Python v2 implementation
+        working-directory: implementations/python-v2
+        run: pip install -e .
 
       - name: Install Aptos CLI
         run: |
@@ -170,6 +191,16 @@ jobs:
             GOCACHE="${{ github.workspace }}/.cache/go-build" \
             GOMODCACHE="${{ github.workspace }}/.cache/go-mod" \
             go test ./integration -run 'Test(OnChainMultisig|CLIOnChainMultisig)' -v
+          ) || {
+            cat /tmp/aptx-localnet.log
+            exit 1
+          }
+
+          (
+            cd implementations/go-v2
+            GOCACHE="${{ github.workspace }}/.cache/go-build" \
+            GOMODCACHE="${{ github.workspace }}/.cache/go-mod" \
+            go test ./integration -run 'Test(CLIMultiAgent|CLISingle)' -v
           ) || {
             cat /tmp/aptx-localnet.log
             exit 1

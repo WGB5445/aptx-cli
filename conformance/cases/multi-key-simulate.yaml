@@ -1,6 +1,6 @@
 name: multi-key-simulate
 description: Simulate a multi-key transaction with inline flags (Go excluded — multi-key not yet implemented)
-implementations: [typescript, python, rust]
+implementations: [typescript, python, python-v2, go-v2, rust]
 argv:
   - simulate
   - multi-key

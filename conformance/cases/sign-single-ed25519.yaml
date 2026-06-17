@@ -1,6 +1,6 @@
 name: sign-single-ed25519
 description: All 4 SDKs sign the same raw transaction with the same Ed25519 key — signature must match (deterministic)
-implementations: [typescript, python, go, rust]
+implementations: [typescript, python, python-v2, go, go-v2, rust]
 argv:
   - sign
   - --input-bcs
