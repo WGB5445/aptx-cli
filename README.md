@@ -26,8 +26,10 @@ Current implementations:
 
 - matrix overview: [`implementations/README.md`](implementations/README.md)
 - TypeScript: [`implementations/typescript/README.md`](implementations/typescript/README.md)
-- Go: [`implementations/go/README.md`](implementations/go/README.md)
-- Python: [`implementations/python/README.md`](implementations/python/README.md)
+- Go (v1): [`implementations/go/README.md`](implementations/go/README.md)
+- Go (v2): [`implementations/go-v2/README.md`](implementations/go-v2/README.md)
+- Python (v1): [`implementations/python/README.md`](implementations/python/README.md)
+- Python (v2): [`implementations/python-v2/README.md`](implementations/python-v2/README.md)
 - Rust: [`implementations/rust/README.md`](implementations/rust/README.md)
 
 ## Quick Start
@@ -129,8 +131,10 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 | Implementation | SDK | Offline (encode/decode/sign) | Simulate coverage |
 |---|---|---|---|
 | TypeScript | `@aptos-labs/ts-sdk` ^7.1.0 | ✅ | single, multi-agent, multi-key, multi-sig |
-| Go | `aptos-go-sdk` v1.13.0 | ✅ | single, multi-agent, multi-sig (multi-key pending) |
-| Python | `aptos-sdk` >=0.11.0 | ✅ | mock only (no orderless support) |
+| Go (v1) | `aptos-go-sdk` v1.13.0 | ✅ | single, multi-agent, multi-sig (multi-key pending) |
+| Go (v2) | `aptos-go-sdk/v2` v2.0.0-dev | ✅ | single, multi-agent (localnet tests pending) |
+| Python (v1) | `aptos-sdk` >=0.11.0 | ✅ | mock only (no orderless support) |
+| Python (v2) | `aptos-sdk-v2` | ✅ | mock only (localnet tests pending) |
 | Rust | `aptos-sdk` 0.5.0 | ✅ | mock only |
 
 - **BCS encoding is bit-identical across all 4 SDKs** — same inputs → same bytes, proven by `conformance/cases/encode-single.yaml`
