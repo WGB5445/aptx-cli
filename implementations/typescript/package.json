@@ -8,6 +8,7 @@
     "start": "node --experimental-strip-types src/cli.ts",
     "start:bun": "bun src/cli.ts",
     "start:deno": "./scripts/run-deno.sh",
+    "test:keyless-bcs": "node --experimental-strip-types scripts/test-keyless-bcs.ts",
     "test:multikey": "node --experimental-strip-types scripts/live-multikey.ts",
     "test:multisig": "node --experimental-strip-types scripts/live-multisig.ts",
     "typecheck": "tsc --noEmit"

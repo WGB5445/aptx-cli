@@ -69,6 +69,10 @@ jobs:
           GOMODCACHE: ${{ github.workspace }}/.cache/go-mod
         run: go build ./...
 
+      - name: TypeScript keyless BCS tests
+        working-directory: implementations/typescript
+        run: node --experimental-strip-types scripts/test-keyless-bcs.ts
+
       - name: Shared mock conformance
         run: python3 conformance/run.py
 
