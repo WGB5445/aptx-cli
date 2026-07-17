@@ -4,7 +4,10 @@
 > document describes a txn-type implemented only in the TypeScript backend
 > (`implementations/typescript`). It is not required from Python/Go/Rust, and its fields are
 > **not** part of the conformance projection in [`output-schema.json`](output-schema.json) — the
-> `conformance/run.py` runner does not check this txn-type against baselines.
+> `conformance/run.py` runner does not check this txn-type against baselines. See
+> [Cross-SDK verification model](#cross-sdk-verification-model-planned) below for how a future
+> second-language implementation is expected to plug in — it is a different model than
+> `conformance/run.py`'s byte-identical baseline diffing.
 
 ## Background
 
@@ -94,6 +97,44 @@ as advanced/niche and unnecessary to validate the core integration):
 - **Deposit has no recipient**: `--confidential-recipient` is accepted for `withdraw`/`transfer`
   but not `deposit`, because the underlying transaction builder's `deposit()` only supports
   depositing into the sender's own balance.
+
+## Cross-SDK verification model (planned)
+
+Unlike `single`/`multi-agent`/`multi-sig`/`multi-key`, this txn-type cannot use the byte-identical
+BCS/signature comparison `conformance/run.py` uses for e.g. `encode-single.yaml` /
+`sign-single-ed25519.yaml`. Twisted ElGamal ciphertexts, sigma-proofs, and Bulletproofs range
+proofs all draw fresh randomness (blinding factors / proof nonces) per call, so two SDKs given the
+*same logical input* (same amount, same keys) produce different ciphertext/proof bytes and
+different transaction hashes by design — that is not a bug, and a baseline-diff check would never
+be stable across runs even for a single SDK.
+
+When a second-language implementation of this txn-type exists, cross-SDK verification should
+follow the **semantic/interop** model this repo's own localnet test
+(`live-confidential-asset.ts`, see below) already uses internally, generalized across languages:
+
+1. Every implementation exposes the same `--confidential-*` flags/actions described above, so a
+   shared test driver can call any language's CLI interchangeably (the same pattern
+   `tests/live_multi_agent.py` already uses to drive multiple CLIs from one Python script).
+2. Verification decrypts on-chain state rather than comparing transaction bytes: build/submit with
+   CLI A, then independently decrypt the resulting balance with CLI B's (or SDK B's) own
+   decryption path, and assert the plaintext amount matches — not the ciphertext.
+3. The strongest version of this crosses the pairing rather than each SDK only checking its own
+   output: e.g. SDK A registers and deposits, SDK B rolls over and transfers, SDK A withdraws and
+   confirms the final amount. That proves ciphertexts/proofs produced by one implementation are
+   correctly readable and spendable by another — real interop, not just "each SDK can read its own
+   writes".
+4. Because this doesn't fit `conformance/run.py`'s baseline-diff model, it should live as its own
+   interop test target (e.g. `tests/live_confidential_asset_interop.py`) wired into CI once a
+   second language lands, rather than a `conformance/cases/*.yaml` case.
+
+The most likely first second-language candidate is Go: `aptos-go-sdk`'s `v2/confidentialasset`
+package (in development, not yet part of this repo's `implementations/go-v2`) mirrors
+`@aptos-labs/confidential-asset`'s API (see its `doc/TS_GO_MAP.md`) and uses the
+`confidential-asset-bindings` Rust core via CGO/FFI for the proof-heavy operations
+(`Withdraw`/`Transfer`/`NormalizeBalance`/`GetBalance`, under its `confidentialasset/native`
+subpackage) — the same Rust core a Rust CLI implementation would use directly without the FFI
+hop. Until one of these lands in this repo's `implementations/`, this section is a target
+contract, not an implemented mechanism.
 
 ## Test coverage
 
