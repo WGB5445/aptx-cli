@@ -146,6 +146,35 @@ func (s *simulationOnlySignerV2) PubKey() aptos.PublicKey {
 	return s.publicKey
 }
 
+// noAccountSimulationSigner is a Signer for secondary/fee-payer accounts
+// whose key material is unknown at simulate time. Its SimulationAuthenticator
+// returns aptos.NoAccountAuthenticator(), the SDK's variant-4 "no auth"
+// authenticator that the node accepts without checking the account's auth
+// key — mirroring how the v1 SDK's AdditionalSigners(addresses) option lets
+// multi-agent simulation work from addresses alone, with no secondary key
+// required.
+type noAccountSimulationSigner struct{}
+
+func (s *noAccountSimulationSigner) Sign(msg []byte) (*aptos.AccountAuthenticator, error) {
+	return nil, errors.New("no-account simulation signer cannot sign transactions")
+}
+
+func (s *noAccountSimulationSigner) SignMessage(msg []byte) (aptos.Signature, error) {
+	return nil, errors.New("no-account simulation signer cannot sign messages")
+}
+
+func (s *noAccountSimulationSigner) SimulationAuthenticator() *aptos.AccountAuthenticator {
+	return aptos.NoAccountAuthenticator()
+}
+
+func (s *noAccountSimulationSigner) AuthKey() *aptos.AuthenticationKey {
+	return nil
+}
+
+func (s *noAccountSimulationSigner) PubKey() aptos.PublicKey {
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Offline BCS operations (encode/decode/sign) — use v1 types (same format)
 // ---------------------------------------------------------------------------
@@ -666,20 +695,32 @@ func runReal(state State, spec InputSpec) (map[string]any, error) {
 		return nil, err
 	}
 
-	// Parse and BCS-encode entry function args (same logic as v1 — BCS format is identical)
+	// Parse args. Entry-function payloads take pre-BCS-encoded bytes; script
+	// payloads take each arg as a plain Go value tagged by ScriptArgument type
+	// (see v2ScriptArgument), since ScriptPayload.Args is BCS-encoded with an
+	// explicit type tag per argument rather than as raw bytes.
 	rawArgs := make([]any, 0, len(spec.Args))
 	entryArgs := make([][]byte, 0, len(spec.Args))
+	scriptArgs := make([]any, 0, len(spec.Args))
 	for _, item := range spec.Args {
 		arg, err := parseArg(item)
 		if err != nil {
 			return nil, err
 		}
 		rawArgs = append(rawArgs, arg)
-		serialized, err := serializeArgument(arg)
-		if err != nil {
-			return nil, err
+		if spec.ScriptHex != "" {
+			scriptArg, err := v2ScriptArgument(arg)
+			if err != nil {
+				return nil, err
+			}
+			scriptArgs = append(scriptArgs, scriptArg)
+		} else {
+			serialized, err := serializeArgument(arg)
+			if err != nil {
+				return nil, err
+			}
+			entryArgs = append(entryArgs, serialized)
 		}
-		entryArgs = append(entryArgs, serialized)
 	}
 
 	typeArgs := make([]aptos.TypeTag, 0, len(spec.TypeArgs))
@@ -700,26 +741,39 @@ func runReal(state State, spec InputSpec) (map[string]any, error) {
 		return nil, err
 	}
 
-	// Build v2 entry function payload with pre-BCS-encoded args as RawArg
-	v2Args := make([]any, len(entryArgs))
-	for i, b := range entryArgs {
-		v2Args[i] = aptos.RawArg(b)
-	}
+	var txnPayload aptos.Payload
+	if spec.ScriptHex != "" {
+		scriptCode, err := decodeHex(spec.ScriptHex)
+		if err != nil {
+			return nil, err
+		}
+		txnPayload = &aptos.ScriptPayload{
+			Code:     scriptCode,
+			TypeArgs: typeArgs,
+			Args:     scriptArgs,
+		}
+	} else {
+		// Build v2 entry function payload with pre-BCS-encoded args as RawArg
+		v2Args := make([]any, len(entryArgs))
+		for i, b := range entryArgs {
+			v2Args[i] = aptos.RawArg(b)
+		}
 
-	parts := strings.SplitN(spec.Function, "::", 3)
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid function: %s", spec.Function)
-	}
-	moduleAddr, err := parseV2Address(parts[0])
-	if err != nil {
-		return nil, err
-	}
+		parts := strings.SplitN(spec.Function, "::", 3)
+		if len(parts) != 3 {
+			return nil, fmt.Errorf("invalid function: %s", spec.Function)
+		}
+		moduleAddr, err := parseV2Address(parts[0])
+		if err != nil {
+			return nil, err
+		}
 
-	txnPayload := &aptos.EntryFunctionPayload{
-		Module:   aptos.ModuleID{Address: moduleAddr, Name: parts[1]},
-		Function: parts[2],
-		TypeArgs: typeArgs,
-		Args:     v2Args,
+		txnPayload = &aptos.EntryFunctionPayload{
+			Module:   aptos.ModuleID{Address: moduleAddr, Name: parts[1]},
+			Function: parts[2],
+			TypeArgs: typeArgs,
+			Args:     v2Args,
+		}
 	}
 
 	// Build transaction options
@@ -797,11 +851,12 @@ func runReal(state State, spec InputSpec) (map[string]any, error) {
 					}
 					secSigners[i] = key
 				} else {
-					tmpKey, err := aptos.GenerateEd25519PrivateKey()
-					if err != nil {
-						return nil, err
-					}
-					secSigners[i] = tmpKey
+					// No secondary key material provided: use a no-auth
+					// simulation signer rather than a random ephemeral key,
+					// since a random key's auth key would never match the
+					// real secondary account's and the node would reject
+					// the simulation with INVALID_AUTH_KEY.
+					secSigners[i] = &noAccountSimulationSigner{}
 				}
 			}
 			simResult, err = client.SimulateMultiAgentTransaction(ctx, rawTxn, signer, secSigners, secondaryAddresses)
@@ -1391,6 +1446,62 @@ func serializeArgument(arg any) ([]byte, error) {
 		}
 	default:
 		return nil, fmt.Errorf("unsupported argument variant: %T", arg)
+	}
+}
+
+// v2ScriptArgument converts a parsed --arg into the plain Go value expected
+// by aptos.ScriptPayload.Args (the v2 SDK tags each script argument with its
+// ScriptArgument type variant during BCS serialization, so unlike entry
+// function args these must not be pre-BCS-encoded).
+func v2ScriptArgument(arg any) (any, error) {
+	switch typed := arg.(type) {
+	case RawArg:
+		return nil, fmt.Errorf("raw:<hex> script arguments are not supported: %s", typed.Raw)
+	case ParsedArg:
+		switch typed.ArgType {
+		case "address":
+			address, err := parseV2Address(typed.Value)
+			if err != nil {
+				return nil, err
+			}
+			return address, nil
+		case "u8":
+			value, err := strconv.ParseUint(typed.Value, 10, 8)
+			if err != nil {
+				return nil, err
+			}
+			return uint8(value), nil
+		case "u16":
+			value, err := strconv.ParseUint(typed.Value, 10, 16)
+			if err != nil {
+				return nil, err
+			}
+			return uint16(value), nil
+		case "u32":
+			value, err := strconv.ParseUint(typed.Value, 10, 32)
+			if err != nil {
+				return nil, err
+			}
+			return uint32(value), nil
+		case "u64":
+			value, err := strconv.ParseUint(typed.Value, 10, 64)
+			if err != nil {
+				return nil, err
+			}
+			return value, nil
+		case "bool":
+			return typed.Value == "true", nil
+		case "string":
+			return []byte(typed.Value), nil
+		case "hex":
+			return decodeHex(typed.Value)
+		case "vector<u8>":
+			return parseVectorU8(typed.Value)
+		default:
+			return nil, fmt.Errorf("unsupported script argument type: %s", typed.ArgType)
+		}
+	default:
+		return nil, fmt.Errorf("unsupported script argument variant: %T", arg)
 	}
 }
 
