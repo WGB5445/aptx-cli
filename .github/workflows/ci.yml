@@ -191,6 +191,14 @@ jobs:
           }
 
           (
+            cd implementations/typescript
+            pnpm --silent test:confidential-asset
+          ) || {
+            cat /tmp/aptx-localnet.log
+            exit 1
+          }
+
+          (
             cd implementations/go
             GOCACHE="${{ github.workspace }}/.cache/go-build" \
             GOMODCACHE="${{ github.workspace }}/.cache/go-mod" \

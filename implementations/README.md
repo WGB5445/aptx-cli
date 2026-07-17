@@ -6,7 +6,7 @@ This directory contains language-specific implementations of the same canonical 
 
 | Language | Target SDK | Real SDK Coverage | Localnet Integration |
 | --- | --- | --- | --- |
-| TypeScript | `@aptos-labs/ts-sdk` | `single`, `multi-agent`, `multi-key`, `multi-sig`, `inspect` | yes |
+| TypeScript | `@aptos-labs/ts-sdk` | `single`, `multi-agent`, `multi-key`, `multi-sig`, `inspect`, `confidential-asset` (TS-only, see [spec/confidential-asset.md](../spec/confidential-asset.md)) | yes |
 | Go (v1) | `github.com/aptos-labs/aptos-go-sdk` v1.x | `single`, `multi-agent`, `multi-sig`, `inspect` | yes |
 | Go (v2) | `github.com/aptos-labs/aptos-go-sdk/v2` | `single` ✅, `multi-agent` ✅, `multi-key`/`multi-sig` ❌ | no (pending) |
 | Python (v1) | `aptos-sdk >= 0.11.0` (PyPI) | `single` ✅, `multi-agent` ⚠️ (primary-only), `multi-key`/`multi-sig` ❌ | no |

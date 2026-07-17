@@ -25,6 +25,9 @@ Implemented real SDK-backed flows:
 - `multi-key`
 - `multi-sig`
 - `inspect`
+- `confidential-asset` (TS-only, backed by `@aptos-labs/confidential-asset`; see
+  [`spec/confidential-asset.md`](../../spec/confidential-asset.md) — not part of the
+  cross-language canonical CLI contract)
 
 ## Local Validation
 
@@ -50,4 +53,13 @@ APTX_TEST_NETWORK=local \
 APTX_TEST_FULLNODE=http://127.0.0.1:8080/v1 \
 APTX_TEST_FAUCET=http://127.0.0.1:8081 \
 pnpm --silent test:multisig
+```
+
+Localnet confidential-asset:
+
+```bash
+APTX_TEST_NETWORK=local \
+APTX_TEST_FULLNODE=http://127.0.0.1:8080/v1 \
+APTX_TEST_FAUCET=http://127.0.0.1:8081 \
+pnpm --silent test:confidential-asset
 ```
