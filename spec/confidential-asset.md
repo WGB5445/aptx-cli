@@ -1,13 +1,16 @@
-# Confidential Asset Spec (TypeScript-only extension)
+# Confidential Asset Spec (TypeScript + Go v2 extension)
 
 > **Not part of the cross-language contract.** Unlike [`canonical-cli.md`](canonical-cli.md), this
-> document describes a txn-type implemented only in the TypeScript backend
-> (`implementations/typescript`). It is not required from Python/Go/Rust, and its fields are
-> **not** part of the conformance projection in [`output-schema.json`](output-schema.json) — the
-> `conformance/run.py` runner does not check this txn-type against baselines. See
-> [Cross-SDK verification model](#cross-sdk-verification-model-planned) below for how a future
-> second-language implementation is expected to plug in — it is a different model than
-> `conformance/run.py`'s byte-identical baseline diffing.
+> document describes a txn-type implemented in the TypeScript backend
+> (`implementations/typescript`, fully supported, CI-tested) and the Go v2 backend
+> (`implementations/go-v2`, experimental — depends on an unmerged upstream `aptos-go-sdk` branch,
+> not yet wired into CI, see [`implementations/go-v2/README.md`](../implementations/go-v2/README.md#confidential-asset-experimental-local-only-for-now)).
+> It is not required from Python/Rust, and its fields are **not** part of the conformance
+> projection in [`output-schema.json`](output-schema.json) — the `conformance/run.py` runner does
+> not check this txn-type against baselines. See
+> [Cross-SDK verification model](#cross-sdk-verification-model) below for how this actually works
+> across TS and Go — it is a different model than `conformance/run.py`'s byte-identical baseline
+> diffing.
 
 ## Background
 
@@ -117,7 +120,7 @@ as advanced/niche and unnecessary to validate the core integration):
   transfers again once rotation completes (`unpause`, also not exposed) — both use the underlying
   library's default (`true`), matching the common case.
 
-## Cross-SDK verification model (planned)
+## Cross-SDK verification model
 
 Unlike `single`/`multi-agent`/`multi-sig`/`multi-key`, this txn-type cannot use the byte-identical
 BCS/signature comparison `conformance/run.py` uses for e.g. `encode-single.yaml` /
@@ -127,33 +130,47 @@ proofs all draw fresh randomness (blinding factors / proof nonces) per call, so 
 different transaction hashes by design — that is not a bug, and a baseline-diff check would never
 be stable across runs even for a single SDK.
 
-When a second-language implementation of this txn-type exists, cross-SDK verification should
-follow the **semantic/interop** model this repo's own localnet test
-(`live-confidential-asset.ts`, see below) already uses internally, generalized across languages:
+Cross-SDK verification instead follows a **semantic/interop** model, implemented for TS ↔ Go v2 in
+`tests/live_confidential_asset_interop.py` (repo root):
 
-1. Every implementation exposes the same `--confidential-*` flags/actions described above, so a
-   shared test driver can call any language's CLI interchangeably (the same pattern
-   `tests/live_multi_agent.py` already uses to drive multiple CLIs from one Python script).
+1. Both implementations expose the same `--confidential-*` flags/actions described above, so the
+   test driver calls either language's CLI interchangeably (the same pattern
+   `tests/live_multi_agent.py` uses to drive multiple CLIs from one Python script).
 2. Verification decrypts on-chain state rather than comparing transaction bytes: build/submit with
    CLI A, then independently decrypt the resulting balance with CLI B's (or SDK B's) own
    decryption path, and assert the plaintext amount matches — not the ciphertext.
-3. The strongest version of this crosses the pairing rather than each SDK only checking its own
-   output: e.g. SDK A registers and deposits, SDK B rolls over and transfers, SDK A withdraws and
-   confirms the final amount. That proves ciphertexts/proofs produced by one implementation are
-   correctly readable and spendable by another — real interop, not just "each SDK can read its own
-   writes".
-4. Because this doesn't fit `conformance/run.py`'s baseline-diff model, it should live as its own
-   interop test target (e.g. `tests/live_confidential_asset_interop.py`) wired into CI once a
-   second language lands, rather than a `conformance/cases/*.yaml` case.
+3. The test crosses the pairing rather than each SDK only checking its own output: Go registers,
+   deposits, rolls over, normalizes, and transfers alice's balance to bob; TS registers bob, rolls
+   his balance over, normalizes it, and withdraws — proving ciphertexts/proofs produced by Go are
+   correctly read and spent by TS (and vice versa for the writes TS makes that Go reads), not just
+   "each SDK can read its own writes". Every checkpoint is decrypted independently by both Go's
+   `native.GetBalance` and TS's `ConfidentialAsset.getBalance` and asserted to agree.
+4. Because this doesn't fit `conformance/run.py`'s baseline-diff model, it lives as its own interop
+   test target rather than a `conformance/cases/*.yaml` case.
 
-The most likely first second-language candidate is Go: `aptos-go-sdk`'s `v2/confidentialasset`
-package (in development, not yet part of this repo's `implementations/go-v2`) mirrors
-`@aptos-labs/confidential-asset`'s API (see its `doc/TS_GO_MAP.md`) and uses the
-`confidential-asset-bindings` Rust core via CGO/FFI for the proof-heavy operations
-(`Withdraw`/`Transfer`/`NormalizeBalance`/`GetBalance`, under its `confidentialasset/native`
-subpackage) — the same Rust core a Rust CLI implementation would use directly without the FFI
-hop. Until one of these lands in this repo's `implementations/`, this section is a target
-contract, not an implemented mechanism.
+**Go v2's implementation** is `aptos-go-sdk`'s `v2/confidentialasset` package (branch
+`logan/v2-confidential-asset`, **not yet merged upstream** — see
+[`implementations/go-v2/README.md`](../implementations/go-v2/README.md#confidential-asset-experimental-local-only-for-now)
+for the exact setup required, including a small additive refactor on that branch splitting
+payload-building from signing/submitting so `simulate` can be a real dry run there too, matching
+every other txn-type). It mirrors `@aptos-labs/confidential-asset`'s API (see its
+`doc/TS_GO_MAP.md`) and uses the `confidential-asset-bindings` Rust core via CGO/FFI for the
+proof-heavy operations (`Withdraw`/`Transfer`/`NormalizeBalance`/`GetBalance`, under its
+`confidentialasset/native` subpackage) — the same Rust core a Rust CLI implementation would use
+directly without the FFI hop, if one is added later.
+
+Because `implementations/go-v2/go.mod` currently points at a local filesystem checkout of that
+unmerged branch (not a real pseudo-version fetchable from a plain `git clone` + CI), the interop
+test is **not yet wired into CI** — it's run manually today. Once the `aptos-go-sdk` branch merges
+upstream and `go.mod` can reference a real version, wiring `tests/live_confidential_asset_interop.py`
+into the `localnet-live` CI job is the natural next step.
+
+**Cross-SDK finding from building this:** Go's `Transfer`/`Withdraw` require the balance to
+already be normalized and error otherwise; TS's do not enforce this. A Go-driven flow needs an
+explicit `normalize` after `rollover` before `transfer`/`withdraw` in cases where the equivalent TS
+flow doesn't — a genuine behavioral difference between the two SDKs that this cross-SDK test
+surfaced, documented in
+[`implementations/go-v2/README.md`](../implementations/go-v2/README.md#known-cross-sdk-behavioral-difference).
 
 ## Test coverage
 
@@ -167,3 +184,9 @@ reported success) to assert the expected available/pending amounts — including
 that the balance decrypts correctly (and to the same amount) under the **new** decryption key.
 `register` is also simulated through both the `node` and `deno` runtimes as a lightweight parity
 check, matching the pattern in `live-multikey.ts`/`live-multisig.ts`.
+
+`tests/live_confidential_asset_interop.py` (repo root, manual — see
+[Cross-SDK verification model](#cross-sdk-verification-model)) covers the Go v2 side and the
+TS ↔ Go interop: `register` → `deposit` → `rollover` → `normalize` → `transfer` (all Go) → `rollover`
+→ `normalize` → `withdraw` (all TS), with every balance checkpoint decrypted and cross-checked by
+both `native.GetBalance` (Go) and `ConfidentialAsset.getBalance` (TS).

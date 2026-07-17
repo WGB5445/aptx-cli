@@ -36,9 +36,10 @@ Implemented real SDK-backed flows:
 - `multi-key`
 - `multi-sig`
 - `inspect`
-- `confidential-asset` (TS-only, backed by `@aptos-labs/confidential-asset`; see
+- `confidential-asset` (backed by `@aptos-labs/confidential-asset`; see
   [`spec/confidential-asset.md`](../../spec/confidential-asset.md) — not part of the
-  cross-language canonical CLI contract)
+  cross-language canonical CLI contract, but cross-checked against Go v2's implementation, see
+  [`tests/live_confidential_asset_interop.py`](../../tests/live_confidential_asset_interop.py))
 
 ## Local Validation
 

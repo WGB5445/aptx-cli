@@ -6,9 +6,9 @@ This directory contains language-specific implementations of the same canonical 
 
 | Language | Target SDK | Real SDK Coverage | Localnet Integration |
 | --- | --- | --- | --- |
-| TypeScript | `@aptos-labs/ts-sdk` | `single`, `multi-agent`, `multi-key`, `multi-sig`, `inspect`, `confidential-asset` (TS-only, see [spec/confidential-asset.md](../spec/confidential-asset.md)) | yes |
+| TypeScript | `@aptos-labs/ts-sdk` | `single`, `multi-agent`, `multi-key`, `multi-sig`, `inspect`, `confidential-asset` (see [spec/confidential-asset.md](../spec/confidential-asset.md)) | yes |
 | Go (v1) | `github.com/aptos-labs/aptos-go-sdk` v1.x | `single`, `multi-agent`, `multi-sig`, `inspect` | yes |
-| Go (v2) | `github.com/aptos-labs/aptos-go-sdk/v2` | `single` ✅, `multi-agent` ✅, `multi-key`/`multi-sig` ❌ | no (pending) |
+| Go (v2) | `github.com/aptos-labs/aptos-go-sdk/v2` | `single` ✅, `multi-agent` ✅, `confidential-asset` ⚠️ (experimental, local-only — see [go-v2/README.md](go-v2/README.md#confidential-asset-experimental-local-only-for-now)), `multi-key`/`multi-sig` ❌ | no (pending) |
 | Python (v1) | `aptos-sdk >= 0.11.0` (PyPI) | `single` ✅, `multi-agent` ⚠️ (primary-only), `multi-key`/`multi-sig` ❌ | no |
 | Python (v2) | `aptos-sdk-v2` | `single` ✅, `multi-agent` ⚠️ (primary-only), `multi-key`/`multi-sig` ❌ | no (pending) |
 | Rust | `aptos-sdk = "0.5.0"` (crates.io) | `single` ✅, `multi-agent` ✅ (NoAccountAuth), `multi-key`/`multi-sig` ❌ | no |

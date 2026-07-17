@@ -35,75 +35,89 @@ type RawArg struct {
 }
 
 type State struct {
-	Action                   string
-	TxnType                  string
-	Input                    string
-	InputFormat              string
-	Output                   string
-	OutputFormat             string
-	ArtifactsDir             string
-	Network                  string
-	Function                 string
-	ScriptHex                string
-	Args                     []string
-	TypeArgs                 []string
-	SecondarySignerAddresses []string
-	SecondaryPrivateKeys     []string
-	SecondaryPublicKeys      []string
-	SenderAddress            string
-	PrivateKey               string
-	PrivateKeyEnv            string
-	PrivateKeyFile           string
-	PublicKey                string
-	PublicKeyEnv             string
-	PublicKeyFile            string
-	Profile                  string
-	Hash                     string
-	Fullnode                 string
-	MultisigAction           string
-	MultisigAddress          string
-	MultisigOwnerAddresses   []string
-	MultisigThreshold        int
-	MultisigSequence         int
-	MultisigHashOnly         bool
-	MultiKeyPublicKeys       []string
-	MultiKeyThreshold        int
-	MultiKeySigners          []string
-	NoSign                   bool
-	ABIEnabled               bool
-	Verbose                  bool
-	Quiet                    bool
-	SDKMode                  string
-	SequenceNumber           uint64
-	ChainID                  uint8
-	MaxGasAmount             uint64
-	GasUnitPrice             uint64
-	ExpirationTimestamp      uint64
-	Nonce                    string
-	InputBcs                 string
-	FeePayerAddress          string
+	Action                        string
+	TxnType                       string
+	Input                         string
+	InputFormat                   string
+	Output                        string
+	OutputFormat                  string
+	ArtifactsDir                  string
+	Network                       string
+	Function                      string
+	ScriptHex                     string
+	Args                          []string
+	TypeArgs                      []string
+	SecondarySignerAddresses      []string
+	SecondaryPrivateKeys          []string
+	SecondaryPublicKeys           []string
+	SenderAddress                 string
+	PrivateKey                    string
+	PrivateKeyEnv                 string
+	PrivateKeyFile                string
+	PublicKey                     string
+	PublicKeyEnv                  string
+	PublicKeyFile                 string
+	Profile                       string
+	Hash                          string
+	Fullnode                      string
+	MultisigAction                string
+	MultisigAddress               string
+	MultisigOwnerAddresses        []string
+	MultisigThreshold             int
+	MultisigSequence              int
+	MultisigHashOnly              bool
+	MultiKeyPublicKeys            []string
+	MultiKeyThreshold             int
+	MultiKeySigners               []string
+	ConfidentialAction            string
+	ConfidentialTokenAddress      string
+	ConfidentialDecryptionKey     string
+	ConfidentialAmount            string
+	ConfidentialRecipient         string
+	ConfidentialWithPauseIncoming bool
+	ConfidentialMemo              string
+	NoSign                        bool
+	ABIEnabled                    bool
+	Verbose                       bool
+	Quiet                         bool
+	SDKMode                       string
+	SequenceNumber                uint64
+	ChainID                       uint8
+	MaxGasAmount                  uint64
+	GasUnitPrice                  uint64
+	ExpirationTimestamp           uint64
+	Nonce                         string
+	InputBcs                      string
+	FeePayerAddress               string
 }
 
 type InputSpec struct {
-	Network                  string   `json:"network"`
-	Function                 string   `json:"function"`
-	ScriptHex                string   `json:"script_hex"`
-	SenderAddress            string   `json:"sender_address"`
-	Args                     []string `json:"args"`
-	TypeArgs                 []string `json:"type_args"`
-	SecondarySignerAddresses []string `json:"secondary_signer_addresses"`
-	ABIEnabled               bool     `json:"abi_enabled"`
-	NoSign                   bool     `json:"no_sign"`
-	Hash                     string   `json:"hash"`
-	Fullnode                 string   `json:"fullnode"`
-	MultisigAction           string   `json:"multisig_action"`
-	MultisigAddress          string   `json:"multisig_address"`
-	MultisigOwnerAddresses   []string `json:"multisig_owner_addresses"`
-	MultisigThreshold        int      `json:"multisig_threshold"`
-	MultisigSequence         int      `json:"multisig_sequence"`
-	MultisigHashOnly         bool     `json:"multisig_hash_only"`
-	MultiKeyPublicKeys       []string `json:"multi_key_public_keys"`
-	MultiKeyThreshold        int      `json:"multi_key_threshold"`
+	Network                       string   `json:"network"`
+	Function                      string   `json:"function"`
+	ScriptHex                     string   `json:"script_hex"`
+	SenderAddress                 string   `json:"sender_address"`
+	Args                          []string `json:"args"`
+	TypeArgs                      []string `json:"type_args"`
+	SecondarySignerAddresses      []string `json:"secondary_signer_addresses"`
+	ABIEnabled                    bool     `json:"abi_enabled"`
+	NoSign                        bool     `json:"no_sign"`
+	Hash                          string   `json:"hash"`
+	Fullnode                      string   `json:"fullnode"`
+	MultisigAction                string   `json:"multisig_action"`
+	MultisigAddress               string   `json:"multisig_address"`
+	MultisigOwnerAddresses        []string `json:"multisig_owner_addresses"`
+	MultisigThreshold             int      `json:"multisig_threshold"`
+	MultisigSequence              int      `json:"multisig_sequence"`
+	MultisigHashOnly              bool     `json:"multisig_hash_only"`
+	MultiKeyPublicKeys            []string `json:"multi_key_public_keys"`
+	MultiKeyThreshold             int      `json:"multi_key_threshold"`
+	ConfidentialAction            string   `json:"confidential_action"`
+	ConfidentialTokenAddress      string   `json:"confidential_token_address"`
+	ConfidentialDecryptionKey     string   `json:"confidential_decryption_key"`
+	ConfidentialAmount            string   `json:"confidential_amount"`
+	ConfidentialRecipient         string   `json:"confidential_recipient"`
+	ConfidentialWithPauseIncoming bool     `json:"confidential_with_pause_incoming"`
+	ConfidentialMemo              string   `json:"confidential_memo"`
 }
 
 type AbiSummary struct {
@@ -472,25 +486,32 @@ func run(argv []string) error {
 	}
 
 	spec := InputSpec{
-		Network:                  firstNonEmpty(state.Network, asString(fileInput["network"], "testnet")),
-		Function:                 firstNonEmpty(state.Function, asString(fileInput["function"], "")),
-		ScriptHex:                firstNonEmpty(state.ScriptHex, asString(fileInput["script_hex"], "")),
-		SenderAddress:            firstNonEmpty(state.SenderAddress, asString(fileInput["sender_address"], "0x0")),
-		Args:                     firstNonEmptySlice(state.Args, asStringSlice(fileInput["args"])),
-		TypeArgs:                 firstNonEmptySlice(state.TypeArgs, asStringSlice(fileInput["type_args"])),
-		SecondarySignerAddresses: firstNonEmptySlice(state.SecondarySignerAddresses, asStringSlice(fileInput["secondary_signer_addresses"])),
-		ABIEnabled:               state.ABIEnabled && asBool(fileInput["abi_enabled"], true),
-		NoSign:                   state.NoSign || asBool(fileInput["no_sign"], false),
-		Hash:                     firstNonEmpty(state.Hash, asString(fileInput["hash"], "")),
-		Fullnode:                 firstNonEmpty(state.Fullnode, asString(fileInput["fullnode"], "")),
-		MultisigAction:           firstNonEmpty(state.MultisigAction, asString(fileInput["multisig_action"], "")),
-		MultisigAddress:          firstNonEmpty(state.MultisigAddress, asString(fileInput["multisig_address"], "")),
-		MultisigOwnerAddresses:   firstNonEmptySlice(state.MultisigOwnerAddresses, asStringSlice(fileInput["multisig_owner_addresses"])),
-		MultisigThreshold:        firstNonZero(state.MultisigThreshold, asInt(fileInput["multisig_threshold"], 0)),
-		MultisigSequence:         firstNonZero(state.MultisigSequence, asInt(fileInput["multisig_sequence"], 0)),
-		MultisigHashOnly:         state.MultisigHashOnly || asBool(fileInput["multisig_hash_only"], false),
-		MultiKeyPublicKeys:       firstNonEmptySlice(state.MultiKeyPublicKeys, asStringSlice(fileInput["multi_key_public_keys"])),
-		MultiKeyThreshold:        firstNonZero(state.MultiKeyThreshold, asInt(fileInput["multi_key_threshold"], 0)),
+		Network:                       firstNonEmpty(state.Network, asString(fileInput["network"], "testnet")),
+		Function:                      firstNonEmpty(state.Function, asString(fileInput["function"], "")),
+		ScriptHex:                     firstNonEmpty(state.ScriptHex, asString(fileInput["script_hex"], "")),
+		SenderAddress:                 firstNonEmpty(state.SenderAddress, asString(fileInput["sender_address"], "0x0")),
+		Args:                          firstNonEmptySlice(state.Args, asStringSlice(fileInput["args"])),
+		TypeArgs:                      firstNonEmptySlice(state.TypeArgs, asStringSlice(fileInput["type_args"])),
+		SecondarySignerAddresses:      firstNonEmptySlice(state.SecondarySignerAddresses, asStringSlice(fileInput["secondary_signer_addresses"])),
+		ABIEnabled:                    state.ABIEnabled && asBool(fileInput["abi_enabled"], true),
+		NoSign:                        state.NoSign || asBool(fileInput["no_sign"], false),
+		Hash:                          firstNonEmpty(state.Hash, asString(fileInput["hash"], "")),
+		Fullnode:                      firstNonEmpty(state.Fullnode, asString(fileInput["fullnode"], "")),
+		MultisigAction:                firstNonEmpty(state.MultisigAction, asString(fileInput["multisig_action"], "")),
+		MultisigAddress:               firstNonEmpty(state.MultisigAddress, asString(fileInput["multisig_address"], "")),
+		MultisigOwnerAddresses:        firstNonEmptySlice(state.MultisigOwnerAddresses, asStringSlice(fileInput["multisig_owner_addresses"])),
+		MultisigThreshold:             firstNonZero(state.MultisigThreshold, asInt(fileInput["multisig_threshold"], 0)),
+		MultisigSequence:              firstNonZero(state.MultisigSequence, asInt(fileInput["multisig_sequence"], 0)),
+		MultisigHashOnly:              state.MultisigHashOnly || asBool(fileInput["multisig_hash_only"], false),
+		MultiKeyPublicKeys:            firstNonEmptySlice(state.MultiKeyPublicKeys, asStringSlice(fileInput["multi_key_public_keys"])),
+		MultiKeyThreshold:             firstNonZero(state.MultiKeyThreshold, asInt(fileInput["multi_key_threshold"], 0)),
+		ConfidentialAction:            firstNonEmpty(state.ConfidentialAction, asString(fileInput["confidential_action"], "")),
+		ConfidentialTokenAddress:      firstNonEmpty(state.ConfidentialTokenAddress, asString(fileInput["confidential_token_address"], "")),
+		ConfidentialDecryptionKey:     firstNonEmpty(state.ConfidentialDecryptionKey, asString(fileInput["confidential_decryption_key"], "")),
+		ConfidentialAmount:            firstNonEmpty(state.ConfidentialAmount, asString(fileInput["confidential_amount"], "")),
+		ConfidentialRecipient:         firstNonEmpty(state.ConfidentialRecipient, asString(fileInput["confidential_recipient"], "")),
+		ConfidentialWithPauseIncoming: state.ConfidentialWithPauseIncoming || asBool(fileInput["confidential_with_pause_incoming"], false),
+		ConfidentialMemo:              firstNonEmpty(state.ConfidentialMemo, asString(fileInput["confidential_memo"], "")),
 	}
 
 	if err := requireValidState(state, spec); err != nil {
@@ -688,6 +709,10 @@ func runReal(state State, spec InputSpec) (map[string]any, error) {
 
 	if state.Action == "inspect" {
 		return inspectV2(ctx, client, state, spec)
+	}
+
+	if state.TxnType == "confidential-asset" {
+		return runRealConfidentialAsset(ctx, client, state, spec)
 	}
 
 	abi, err := resolveV2ABISummary(ctx, client, spec)
@@ -1203,6 +1228,26 @@ func parseCLI(argv []string) (State, error) {
 		case "--multi-key-signer":
 			state.MultiKeySigners = append(state.MultiKeySigners, next)
 			i++
+		case "--confidential-action":
+			state.ConfidentialAction = next
+			i++
+		case "--confidential-token-address":
+			state.ConfidentialTokenAddress = next
+			i++
+		case "--confidential-decryption-key":
+			state.ConfidentialDecryptionKey = next
+			i++
+		case "--confidential-amount":
+			state.ConfidentialAmount = next
+			i++
+		case "--confidential-recipient":
+			state.ConfidentialRecipient = next
+			i++
+		case "--confidential-with-pause-incoming":
+			state.ConfidentialWithPauseIncoming = true
+		case "--confidential-memo":
+			state.ConfidentialMemo = next
+			i++
 		case "--sdk-mode":
 			state.SDKMode = next
 			i++
@@ -1266,12 +1311,39 @@ func requireValidState(state State, spec InputSpec) error {
 	if state.Action == "inspect" || state.Action == "encode" || state.Action == "decode" || state.Action == "sign" {
 		return nil
 	}
-	if spec.Function == "" && spec.ScriptHex == "" && state.TxnType != "multi-sig" {
+	if spec.Function == "" && spec.ScriptHex == "" && state.TxnType != "multi-sig" && state.TxnType != "confidential-asset" {
 		return errors.New("missing function or --script-hex")
 	}
 	// multi-key and multi-sig are mock-only in go-v2 for now; real SDK path not yet implemented.
-	if state.SDKMode != "mock" && state.TxnType != "single" && state.TxnType != "multi-agent" {
+	if state.SDKMode != "mock" && state.TxnType != "single" && state.TxnType != "multi-agent" && state.TxnType != "confidential-asset" {
 		return fmt.Errorf("%s real SDK path is not yet implemented in go-v2; use --sdk-mode mock", state.TxnType)
+	}
+	if state.TxnType == "confidential-asset" {
+		if spec.Function != "" || spec.ScriptHex != "" || len(state.Args) > 0 || len(state.TypeArgs) > 0 {
+			return errors.New("confidential-asset does not accept --function, --script-hex, --arg, or --type-arg")
+		}
+		switch spec.ConfidentialAction {
+		case "register", "deposit", "withdraw", "transfer", "rollover", "normalize":
+		case "":
+			return errors.New("confidential-asset requires --confidential-action")
+		default:
+			return fmt.Errorf("unsupported confidential-asset action: %s", spec.ConfidentialAction)
+		}
+		if spec.ConfidentialTokenAddress == "" {
+			return errors.New("confidential-asset requires --confidential-token-address")
+		}
+		needsDecryptionKey := spec.ConfidentialAction == "register" || spec.ConfidentialAction == "withdraw" ||
+			spec.ConfidentialAction == "transfer" || spec.ConfidentialAction == "normalize"
+		if needsDecryptionKey && spec.ConfidentialDecryptionKey == "" {
+			return fmt.Errorf("confidential-asset %s requires --confidential-decryption-key", spec.ConfidentialAction)
+		}
+		needsAmount := spec.ConfidentialAction == "deposit" || spec.ConfidentialAction == "withdraw" || spec.ConfidentialAction == "transfer"
+		if needsAmount && spec.ConfidentialAmount == "" {
+			return fmt.Errorf("confidential-asset %s requires --confidential-amount", spec.ConfidentialAction)
+		}
+		if spec.ConfidentialAction == "transfer" && spec.ConfidentialRecipient == "" {
+			return errors.New("confidential-asset transfer requires --confidential-recipient")
+		}
 	}
 	if state.TxnType == "multi-agent" && state.SDKMode != "mock" && len(spec.SecondarySignerAddresses) == 0 {
 		return errors.New("multi-agent requires at least one --secondary-signer-address")
@@ -1321,6 +1393,11 @@ func runMock(state State, spec InputSpec) (map[string]any, error) {
 		strconv.FormatBool(spec.MultisigHashOnly),
 		strings.Join(spec.MultiKeyPublicKeys, ","),
 		strconv.Itoa(spec.MultiKeyThreshold),
+		spec.ConfidentialAction,
+		spec.ConfidentialTokenAddress,
+		spec.ConfidentialAmount,
+		spec.ConfidentialRecipient,
+		strconv.FormatBool(spec.ConfidentialWithPauseIncoming),
 		strconv.FormatBool(spec.ABIEnabled),
 		signMode,
 	}, "|")
@@ -1334,24 +1411,30 @@ func runMock(state State, spec InputSpec) (map[string]any, error) {
 		"txn_type":       state.TxnType,
 		"abi_enabled":    spec.ABIEnabled,
 		"input": map[string]any{
-			"network":                    spec.Network,
-			"function":                   spec.Function,
-			"script_hex":                 spec.ScriptHex,
-			"sender_address":             spec.SenderAddress,
-			"args":                       spec.Args,
-			"parsed_args":                parsedArgs,
-			"type_args":                  spec.TypeArgs,
-			"secondary_signer_addresses": spec.SecondarySignerAddresses,
-			"multisig_action":            spec.MultisigAction,
-			"multisig_address":           spec.MultisigAddress,
-			"multisig_owner_addresses":   spec.MultisigOwnerAddresses,
-			"multisig_threshold":         spec.MultisigThreshold,
-			"multisig_sequence":          spec.MultisigSequence,
-			"multisig_hash_only":         spec.MultisigHashOnly,
-			"multi_key_public_keys":      spec.MultiKeyPublicKeys,
-			"multi_key_threshold":        spec.MultiKeyThreshold,
-			"hash":                       spec.Hash,
-			"fullnode":                   spec.Fullnode,
+			"network":                          spec.Network,
+			"function":                         spec.Function,
+			"script_hex":                       spec.ScriptHex,
+			"sender_address":                   spec.SenderAddress,
+			"args":                             spec.Args,
+			"parsed_args":                      parsedArgs,
+			"type_args":                        spec.TypeArgs,
+			"secondary_signer_addresses":       spec.SecondarySignerAddresses,
+			"multisig_action":                  spec.MultisigAction,
+			"multisig_address":                 spec.MultisigAddress,
+			"multisig_owner_addresses":         spec.MultisigOwnerAddresses,
+			"multisig_threshold":               spec.MultisigThreshold,
+			"multisig_sequence":                spec.MultisigSequence,
+			"multisig_hash_only":               spec.MultisigHashOnly,
+			"multi_key_public_keys":            spec.MultiKeyPublicKeys,
+			"multi_key_threshold":              spec.MultiKeyThreshold,
+			"confidential_action":              spec.ConfidentialAction,
+			"confidential_token_address":       spec.ConfidentialTokenAddress,
+			"confidential_amount":              spec.ConfidentialAmount,
+			"confidential_recipient":           spec.ConfidentialRecipient,
+			"confidential_with_pause_incoming": spec.ConfidentialWithPauseIncoming,
+			"confidential_memo":                spec.ConfidentialMemo,
+			"hash":                             spec.Hash,
+			"fullnode":                         spec.Fullnode,
 		},
 		"signing": map[string]any{
 			"mode":     signMode,

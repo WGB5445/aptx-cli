@@ -16,3 +16,4 @@ bin/
 target/
 implementations/go/aptx
 implementations/go-v2/aptx
+implementations/go-v2/native/
