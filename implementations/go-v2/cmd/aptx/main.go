@@ -72,6 +72,7 @@ type State struct {
 	ConfidentialAction            string
 	ConfidentialTokenAddress      string
 	ConfidentialDecryptionKey     string
+	ConfidentialNewDecryptionKey  string
 	ConfidentialAmount            string
 	ConfidentialRecipient         string
 	ConfidentialWithPauseIncoming bool
@@ -114,6 +115,7 @@ type InputSpec struct {
 	ConfidentialAction            string   `json:"confidential_action"`
 	ConfidentialTokenAddress      string   `json:"confidential_token_address"`
 	ConfidentialDecryptionKey     string   `json:"confidential_decryption_key"`
+	ConfidentialNewDecryptionKey  string   `json:"confidential_new_decryption_key"`
 	ConfidentialAmount            string   `json:"confidential_amount"`
 	ConfidentialRecipient         string   `json:"confidential_recipient"`
 	ConfidentialWithPauseIncoming bool     `json:"confidential_with_pause_incoming"`
@@ -508,6 +510,7 @@ func run(argv []string) error {
 		ConfidentialAction:            firstNonEmpty(state.ConfidentialAction, asString(fileInput["confidential_action"], "")),
 		ConfidentialTokenAddress:      firstNonEmpty(state.ConfidentialTokenAddress, asString(fileInput["confidential_token_address"], "")),
 		ConfidentialDecryptionKey:     firstNonEmpty(state.ConfidentialDecryptionKey, asString(fileInput["confidential_decryption_key"], "")),
+		ConfidentialNewDecryptionKey:  firstNonEmpty(state.ConfidentialNewDecryptionKey, asString(fileInput["confidential_new_decryption_key"], "")),
 		ConfidentialAmount:            firstNonEmpty(state.ConfidentialAmount, asString(fileInput["confidential_amount"], "")),
 		ConfidentialRecipient:         firstNonEmpty(state.ConfidentialRecipient, asString(fileInput["confidential_recipient"], "")),
 		ConfidentialWithPauseIncoming: state.ConfidentialWithPauseIncoming || asBool(fileInput["confidential_with_pause_incoming"], false),
@@ -1237,6 +1240,9 @@ func parseCLI(argv []string) (State, error) {
 		case "--confidential-decryption-key":
 			state.ConfidentialDecryptionKey = next
 			i++
+		case "--confidential-new-decryption-key":
+			state.ConfidentialNewDecryptionKey = next
+			i++
 		case "--confidential-amount":
 			state.ConfidentialAmount = next
 			i++
@@ -1323,7 +1329,7 @@ func requireValidState(state State, spec InputSpec) error {
 			return errors.New("confidential-asset does not accept --function, --script-hex, --arg, or --type-arg")
 		}
 		switch spec.ConfidentialAction {
-		case "register", "deposit", "withdraw", "transfer", "rollover", "normalize":
+		case "register", "deposit", "withdraw", "transfer", "rollover", "normalize", "rotate":
 		case "":
 			return errors.New("confidential-asset requires --confidential-action")
 		default:
@@ -1333,9 +1339,12 @@ func requireValidState(state State, spec InputSpec) error {
 			return errors.New("confidential-asset requires --confidential-token-address")
 		}
 		needsDecryptionKey := spec.ConfidentialAction == "register" || spec.ConfidentialAction == "withdraw" ||
-			spec.ConfidentialAction == "transfer" || spec.ConfidentialAction == "normalize"
+			spec.ConfidentialAction == "transfer" || spec.ConfidentialAction == "normalize" || spec.ConfidentialAction == "rotate"
 		if needsDecryptionKey && spec.ConfidentialDecryptionKey == "" {
 			return fmt.Errorf("confidential-asset %s requires --confidential-decryption-key", spec.ConfidentialAction)
+		}
+		if spec.ConfidentialAction == "rotate" && spec.ConfidentialNewDecryptionKey == "" {
+			return errors.New("confidential-asset rotate requires --confidential-new-decryption-key")
 		}
 		needsAmount := spec.ConfidentialAction == "deposit" || spec.ConfidentialAction == "withdraw" || spec.ConfidentialAction == "transfer"
 		if needsAmount && spec.ConfidentialAmount == "" {

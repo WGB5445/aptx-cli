@@ -92,18 +92,24 @@ go run ./cmd/aptx run confidential-asset \
 ```
 
 Flags are identical to TypeScript's (`--confidential-action`, `--confidential-token-address`,
-`--confidential-decryption-key`, `--confidential-amount`, `--confidential-recipient`,
-`--confidential-with-pause-incoming`, `--confidential-memo`). Unlike TS, there is no
-`TwistedEd25519PrivateKey` type in Go — the decryption key is always passed as a raw hex string.
+`--confidential-decryption-key`, `--confidential-new-decryption-key`, `--confidential-amount`,
+`--confidential-recipient`, `--confidential-with-pause-incoming`, `--confidential-memo`). Unlike
+TS, there is no `TwistedEd25519PrivateKey` type in Go — decryption keys are always passed as raw
+hex strings. `register`/`deposit`/`rollover`/`rotate` don't need CGO; `withdraw`/`transfer`/
+`normalize` do (see [Setup](#setup-required-before-first-use) above).
 
 ### Known cross-SDK behavioral difference
 
-Go's `Transfer`/`Withdraw` require the balance to already be in normalized (canonical chunked)
-form and return an explicit error otherwise ("balance not normalized; call NormalizeBalance
-first"). TS's `transfer`/`withdraw` do not enforce this precondition. In practice this means a Go
-flow needs an explicit `normalize` step after `rollover` before `transfer`/`withdraw`, even in
-cases where the equivalent TS flow does not. This was found by the cross-SDK interop test (see
-below) and is a genuine SDK difference, not a bug in this CLI's wiring.
+Go's `Transfer`/`Withdraw`/`Rotate` require the balance to already be in normalized (canonical
+chunked) form and return an explicit error otherwise ("balance not normalized; call
+NormalizeBalance first"). TS's `transfer`/`withdraw`/`rotate` do not enforce this precondition —
+notably, TS's `rotate` succeeds immediately after a paused `rollover`, while Go's `rotate` needs
+one *more* explicit `normalize` call after that same paused `rollover` (the resulting on-chain
+state is identical either way; Go's client library just checks more defensively). In practice a Go
+flow needs explicit `normalize` steps in more places than the equivalent TS flow does — e.g. a full
+`rotate` on an already-active balance is `normalize` → `deposit` (any amount) → `rollover
+--confidential-with-pause-incoming` → `normalize` → `rotate`. This was found by hand-testing the Go
+CLI against a real localnet and is a genuine SDK difference, not a bug in this CLI's wiring.
 
 ### Cross-SDK verification
 

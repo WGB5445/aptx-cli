@@ -50,6 +50,12 @@ func buildConfidentialAssetPayload(ctx context.Context, caClient *confidentialas
 		return caClient.BuildDepositPayload(tokenAddress, amount)
 	case "rollover":
 		return caClient.BuildRolloverPendingBalancePayload(tokenAddress, spec.ConfidentialWithPauseIncoming)
+	case "rotate":
+		acct, err := buildConfidentialAssetAccount(state)
+		if err != nil {
+			return nil, err
+		}
+		return caClient.BuildRotateEncryptionKeyPayload(ctx, acct, tokenAddress, spec.ConfidentialDecryptionKey, spec.ConfidentialNewDecryptionKey)
 	case "withdraw", "transfer", "normalize":
 		return buildConfidentialAssetNativePayload(ctx, caClient, state, spec, tokenAddress, senderAddress)
 	default:

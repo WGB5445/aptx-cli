@@ -165,11 +165,13 @@ test is **not yet wired into CI** — it's run manually today. Once the `aptos-g
 upstream and `go.mod` can reference a real version, wiring `tests/live_confidential_asset_interop.py`
 into the `localnet-live` CI job is the natural next step.
 
-**Cross-SDK finding from building this:** Go's `Transfer`/`Withdraw` require the balance to
-already be normalized and error otherwise; TS's do not enforce this. A Go-driven flow needs an
-explicit `normalize` after `rollover` before `transfer`/`withdraw` in cases where the equivalent TS
-flow doesn't — a genuine behavioral difference between the two SDKs that this cross-SDK test
-surfaced, documented in
+**Cross-SDK finding from building this:** Go's `Transfer`/`Withdraw`/`Rotate` require the balance to
+already be normalized and error otherwise; TS's do not enforce this (TS's `rotate` in particular
+succeeds immediately after a paused `rollover`, while Go's `rotate` needs one more explicit
+`normalize` after that same paused `rollover` — the on-chain state is identical either way, Go's
+client just checks more defensively). A Go-driven flow needs explicit `normalize` calls in more
+places than the equivalent TS flow does — a genuine behavioral difference between the two SDKs that
+this cross-SDK test surfaced, documented in
 [`implementations/go-v2/README.md`](../implementations/go-v2/README.md#known-cross-sdk-behavioral-difference).
 
 ## Test coverage
