@@ -4,6 +4,9 @@
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "description": "TypeScript implementation of the Aptos transaction CLI targeting @aptos-labs/ts-sdk",
+  "bin": {
+    "aptx": "bin/aptx"
+  },
   "scripts": {
     "start": "node --experimental-strip-types src/cli.ts",
     "start:bun": "bun src/cli.ts",

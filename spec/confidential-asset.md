@@ -41,12 +41,13 @@ aptx run     confidential-asset    # simulate + submit in one step
 
 | Flag | Required for | Description |
 |---|---|---|
-| `--confidential-action ACTION` | always | One of `register`, `deposit`, `withdraw`, `transfer`, `rollover`, `normalize` |
+| `--confidential-action ACTION` | always | One of `register`, `deposit`, `withdraw`, `transfer`, `rollover`, `normalize`, `rotate` |
 | `--confidential-token-address ADDRESS` | always | The fungible-asset metadata object address (e.g. the APT FA object, resolvable via `0x1::coin::paired_metadata<0x1::aptos_coin::AptosCoin>`) |
-| `--confidential-decryption-key HEX` | `register`, `withdraw`, `transfer`, `normalize` | The sender's `TwistedEd25519PrivateKey`, hex-encoded (32-byte seed, with or without `0x` prefix) |
+| `--confidential-decryption-key HEX` | `register`, `withdraw`, `transfer`, `normalize`, `rotate` | The sender's (current) `TwistedEd25519PrivateKey`, hex-encoded (32-byte seed, with or without `0x` prefix) |
+| `--confidential-new-decryption-key HEX` | `rotate` | The new `TwistedEd25519PrivateKey` to rotate to, same encoding as `--confidential-decryption-key` |
 | `--confidential-amount U64` | `deposit`, `withdraw`, `transfer` | Amount to move, in the asset's base units |
 | `--confidential-recipient ADDRESS` | `transfer` (required); `withdraw` (optional) | Recipient address. For `withdraw`, defaults to the sender if omitted. **Not accepted by `deposit`** — the underlying library only supports self-deposit at this layer |
-| `--confidential-with-pause-incoming` | `rollover` (optional) | Also pause incoming transfers after rolling over (used before a key rotation, which this CLI does not implement — see below) |
+| `--confidential-with-pause-incoming` | `rollover` (optional) | Also pause incoming transfers after rolling over — **required before `rotate`** (see [Behavioral notes](#behavioral-notes)) |
 | `--confidential-memo HEX` | `transfer` (optional) | Optional memo bytes attached to the transfer |
 
 Standard flags (`--network`, `--sender-address`, `--private-key*`, `--output*`, `--sdk-mode`, etc.)
@@ -64,13 +65,13 @@ from the flags above.
 | `transfer` | Sends `--confidential-amount` from the sender's confidential available balance to `--confidential-recipient`'s confidential pending balance |
 | `withdraw` | Moves `--confidential-amount` from the sender's confidential available balance back into a normal balance (the sender's own, or `--confidential-recipient` if given) |
 | `normalize` | Normalizes the sender's available-balance ciphertext into canonical chunked form (needed after enough transfers/deposits accumulate without a rollover) |
+| `rotate` | Rotates the sender's encryption key from `--confidential-decryption-key` to `--confidential-new-decryption-key`, re-encrypting the existing available balance under the new key. Requires incoming transfers to already be paused (see [Behavioral notes](#behavioral-notes)) |
 
 ## Out of scope
 
 Not implemented in this CLI (available in the underlying library, but deliberately excluded here
 as advanced/niche and unnecessary to validate the core integration):
 
-- **Key rotation** (`rotateEncryptionKey` / `rotate_encryption_key_raw`)
 - **Keyless DK backup/recovery** (`registerBalanceAndEncryptDk`, `upsertEd25519BackupKeyAndEncryptDk`,
   `recoverDecryptionKeyFromBackup`) — encrypting/backing up the decryption key under a keyless
   account's Ed25519 backup key
@@ -97,6 +98,24 @@ as advanced/niche and unnecessary to validate the core integration):
 - **Deposit has no recipient**: `--confidential-recipient` is accepted for `withdraw`/`transfer`
   but not `deposit`, because the underlying transaction builder's `deposit()` only supports
   depositing into the sender's own balance.
+- **`rotate` requires incoming transfers to already be paused**: the on-chain module aborts with
+  `E_INCOMING_TRANSFERS_NOT_PAUSED` otherwise. Pausing is a side effect of `rollover
+  --confidential-with-pause-incoming`, which calls a distinct entry function
+  (`rollover_pending_balance_and_pause` vs plain `rollover_pending_balance`) with two more
+  preconditions of its own: (a) the library client-side-checks the available balance is
+  **normalized** first and throws `Balance must be normalized before rollover` otherwise — and a
+  plain `rollover` always leaves the available balance un-normalized (the same underlying fact as
+  the Go cross-SDK finding below, just enforced client-side in TS instead of on-chain), so a
+  `normalize` is needed first if the account has ever rolled over before; and (b) it requires a
+  **nonzero pending balance** to roll over (`E_NOTHING_TO_ROLLOVER` otherwise), so a small `deposit`
+  is also needed first purely to give it something to roll over. In practice, rotating an
+  already-active balance is: `normalize` → `deposit` (any amount, even 1 unit) → `rollover
+  --confidential-with-pause-incoming` → `rotate` (see
+  `implementations/typescript/scripts/live-confidential-asset.ts` for this exact sequence exercised
+  end to end). `rotate` also defaults to requiring the pending balance be empty at rotation time
+  (`checkPendingBalanceEmpty`, not exposed as a CLI flag) and defaults to unpausing incoming
+  transfers again once rotation completes (`unpause`, also not exposed) — both use the underlying
+  library's default (`true`), matching the common case.
 
 ## Cross-SDK verification model (planned)
 
@@ -140,11 +159,11 @@ contract, not an implemented mechanism.
 
 `implementations/typescript/scripts/live-confidential-asset.ts` (run via `pnpm
 test:confidential-asset`, wired into the CI `localnet-live` job) drives the full lifecycle against
-a real localnet: `register` (two accounts) → `deposit` → `rollover` → `transfer` → `rollover` →
-`withdraw`. After each mutating step, it independently decrypts on-chain balances via
+a real localnet: `register` (two accounts) → `deposit` → `rollover` → `normalize` → `deposit` →
+`rollover --confidential-with-pause-incoming` → `rotate` → `transfer` → `rollover` → `withdraw`.
+After each mutating step, it independently decrypts on-chain balances via
 `@aptos-labs/confidential-asset`'s `ConfidentialAsset.getBalance` (not just trusting the CLI's own
-reported success) to assert the expected available/pending amounts. `register` is also simulated
-through both the `node` and `deno` runtimes as a lightweight parity check, matching the pattern in
-`live-multikey.ts`/`live-multisig.ts`. `normalize` is implemented but not exercised by this test,
-since reaching a genuinely "unnormalized" balance requires an artificial setup outside this
-happy-path flow.
+reported success) to assert the expected available/pending amounts — including, after `rotate`,
+that the balance decrypts correctly (and to the same amount) under the **new** decryption key.
+`register` is also simulated through both the `node` and `deno` runtimes as a lightweight parity
+check, matching the pattern in `live-multikey.ts`/`live-multisig.ts`.

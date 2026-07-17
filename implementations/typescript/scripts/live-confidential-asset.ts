@@ -2,8 +2,8 @@
  * Confidential Asset live integration test.
  *
  * Drives the `aptx` CLI's `confidential-asset` txn-type end to end against a real network
- * (localnet by default): register -> deposit -> rollover -> transfer -> rollover -> withdraw.
- * Balance assertions after each mutating step use `@aptos-labs/confidential-asset` directly
+ * (localnet by default): register -> deposit -> rollover -> rotate (key rotation) -> transfer ->
+ * rollover -> withdraw. Balance assertions after each mutating step use `@aptos-labs/confidential-asset` directly
  * (decrypting on-chain state), independent of the CLI, so the check doesn't just trust the
  * CLI's own "success" report.
  *
@@ -18,6 +18,7 @@ import { ConfidentialAsset, TwistedEd25519PrivateKey } from "@aptos-labs/confide
 
 const FUNDING_AMOUNT = 100_000_000;
 const DEPOSIT_AMOUNT = 2_000_000n;
+const ROTATE_PREP_DEPOSIT = 1n;
 const TRANSFER_AMOUNT = 500_000n;
 const WITHDRAW_AMOUNT = TRANSFER_AMOUNT;
 const IMPLEMENTATION_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -152,12 +153,14 @@ function confidentialAssetFlags(args: {
   action: string;
   tokenAddress: string;
   decryptionKey?: TwistedEd25519PrivateKey;
+  newDecryptionKey?: TwistedEd25519PrivateKey;
   amount?: bigint;
   recipient?: string;
   withPauseIncoming?: boolean;
 }): string[] {
   const flags = ["--confidential-action", args.action, "--confidential-token-address", args.tokenAddress];
   if (args.decryptionKey) flags.push("--confidential-decryption-key", args.decryptionKey.toString());
+  if (args.newDecryptionKey) flags.push("--confidential-new-decryption-key", args.newDecryptionKey.toString());
   if (args.amount !== undefined) flags.push("--confidential-amount", args.amount.toString());
   if (args.recipient) flags.push("--confidential-recipient", args.recipient);
   if (args.withPauseIncoming) flags.push("--confidential-with-pause-incoming");
@@ -257,6 +260,74 @@ async function main(): Promise<void> {
   assertEqual("alice available after rollover", aliceAfterDeposit.availableBalance(), DEPOSIT_AMOUNT);
   assertEqual("alice pending after rollover", aliceAfterDeposit.pendingBalance(), 0n);
 
+  // Key rotation. rotate requires incoming transfers to already be paused, which is a side effect
+  // of rollover --confidential-with-pause-incoming (a distinct entry function from plain
+  // rollover) -- and *that* requires (a) a normalized available balance, which the preceding plain
+  // rollover just left un-normalized, and (b) a nonzero pending balance to roll over, so a
+  // normalize and a small prep deposit both come first. See spec/confidential-asset.md's rotate
+  // behavioral notes.
+  assertCliSuccess(
+    "node",
+    "run normalize (alice, rotate prep)",
+    runCli("node", [
+      "run",
+      "confidential-asset",
+      ...baseFlags(alice.accountAddress.toString(), String(alice.privateKey)),
+      ...confidentialAssetFlags({ action: "normalize", tokenAddress, decryptionKey: aliceDk }),
+    ]),
+  );
+
+  assertCliSuccess(
+    "node",
+    "run deposit (alice, rotate prep)",
+    runCli("node", [
+      "run",
+      "confidential-asset",
+      ...baseFlags(alice.accountAddress.toString(), String(alice.privateKey)),
+      ...confidentialAssetFlags({ action: "deposit", tokenAddress, amount: ROTATE_PREP_DEPOSIT }),
+    ]),
+  );
+
+  assertCliSuccess(
+    "node",
+    "run rollover (alice, with-pause-incoming)",
+    runCli("node", [
+      "run",
+      "confidential-asset",
+      ...baseFlags(alice.accountAddress.toString(), String(alice.privateKey)),
+      ...confidentialAssetFlags({ action: "rollover", tokenAddress, withPauseIncoming: true }),
+    ]),
+  );
+
+  const aliceDkRotated = TwistedEd25519PrivateKey.generate();
+  assertCliSuccess(
+    "node",
+    "run rotate (alice)",
+    runCli("node", [
+      "run",
+      "confidential-asset",
+      ...baseFlags(alice.accountAddress.toString(), String(alice.privateKey)),
+      ...confidentialAssetFlags({
+        action: "rotate",
+        tokenAddress,
+        decryptionKey: aliceDk,
+        newDecryptionKey: aliceDkRotated,
+      }),
+    ]),
+  );
+
+  const aliceAfterRotate = await confidentialAsset.getBalance({
+    accountAddress: alice.accountAddress,
+    tokenAddress,
+    decryptionKey: aliceDkRotated,
+  });
+  assertEqual(
+    "alice available after rotate",
+    aliceAfterRotate.availableBalance(),
+    DEPOSIT_AMOUNT + ROTATE_PREP_DEPOSIT,
+  );
+  assertEqual("alice pending after rotate", aliceAfterRotate.pendingBalance(), 0n);
+
   assertCliSuccess(
     "node",
     "run transfer (alice -> bob)",
@@ -267,7 +338,7 @@ async function main(): Promise<void> {
       ...confidentialAssetFlags({
         action: "transfer",
         tokenAddress,
-        decryptionKey: aliceDk,
+        decryptionKey: aliceDkRotated,
         amount: TRANSFER_AMOUNT,
         recipient: bob.accountAddress.toString(),
       }),
@@ -277,12 +348,12 @@ async function main(): Promise<void> {
   const aliceAfterTransfer = await confidentialAsset.getBalance({
     accountAddress: alice.accountAddress,
     tokenAddress,
-    decryptionKey: aliceDk,
+    decryptionKey: aliceDkRotated,
   });
   assertEqual(
     "alice available after transfer",
     aliceAfterTransfer.availableBalance(),
-    DEPOSIT_AMOUNT - TRANSFER_AMOUNT,
+    DEPOSIT_AMOUNT + ROTATE_PREP_DEPOSIT - TRANSFER_AMOUNT,
   );
 
   const bobAfterTransfer = await confidentialAsset.getBalance({

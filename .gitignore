@@ -11,6 +11,7 @@ node_modules/
 .pnpm-store/
 implementations/python/.venv_pkgs/
 bin/
+!implementations/typescript/bin/
 target/
 implementations/go/aptx
 implementations/go-v2/aptx

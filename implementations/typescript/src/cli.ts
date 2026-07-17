@@ -42,7 +42,7 @@ type Action = "simulate" | "submit" | "run" | "inspect" | "encode" | "decode" | 
 type TxnType = "single" | "multi-agent" | "multi-key" | "multi-sig" | "confidential-asset";
 type OutputFormat = "json" | "yaml" | "table" | "ascii";
 type MultisigAction = "create-account" | "propose" | "approve" | "execute";
-type ConfidentialAssetAction = "register" | "deposit" | "withdraw" | "transfer" | "rollover" | "normalize";
+type ConfidentialAssetAction = "register" | "deposit" | "withdraw" | "transfer" | "rollover" | "normalize" | "rotate";
 
 type ParsedArg = { mode: "parsed"; raw: string; argType: string; value: string };
 type RawArg = { mode: "raw"; raw: string; hex: string };
@@ -73,6 +73,7 @@ type InputSpec = {
   confidential_action?: ConfidentialAssetAction;
   confidential_token_address?: string;
   confidential_decryption_key?: string;
+  confidential_new_decryption_key?: string;
   confidential_amount?: string;
   confidential_recipient?: string;
   confidential_with_pause_incoming: boolean;
@@ -117,6 +118,7 @@ type CliState = {
   confidentialAction?: ConfidentialAssetAction;
   confidentialTokenAddress?: string;
   confidentialDecryptionKey?: string;
+  confidentialNewDecryptionKey?: string;
   confidentialAmount?: string;
   confidentialRecipient?: string;
   confidentialWithPauseIncoming: boolean;
@@ -149,12 +151,34 @@ function fail(message: string): never {
   process.exit(2);
 }
 
+const USAGE = `usage: aptx <simulate|submit|run|inspect|encode|decode|sign> <txn-type> [flags]
+
+txn-types: single, multi-agent, multi-key, multi-sig, confidential-asset
+
+confidential-asset flags (see spec/confidential-asset.md for the full contract):
+  --confidential-action <register|deposit|withdraw|transfer|rollover|normalize|rotate>
+  --confidential-token-address <address>
+  --confidential-decryption-key <hex>          (register, withdraw, transfer, normalize, rotate)
+  --confidential-new-decryption-key <hex>      (rotate)
+  --confidential-amount <u64>                  (deposit, withdraw, transfer)
+  --confidential-recipient <address>           (transfer required; withdraw optional)
+  --confidential-with-pause-incoming           (rollover; required before rotate)
+  --confidential-memo <hex>                    (transfer, optional)
+
+example: aptx run confidential-asset --network local --sender-address 0x.. --private-key 0x.. \\
+  --confidential-action deposit --confidential-token-address 0xa --confidential-amount 1000`;
+
+function printUsage(): never {
+  console.error(USAGE);
+  process.exit(2);
+}
+
 function parseArgList(argv: string[]): CliState {
   if (argv[0] === "--") {
     argv = argv.slice(1);
   }
   if (argv.length < 1) {
-    fail("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]");
+    printUsage();
   }
   const action = argv[0] as Action;
   const txnType = (action === "inspect" || action === "decode" || action === "sign" ? "single" : argv[1]) as TxnType;
@@ -322,6 +346,10 @@ function parseArgList(argv: string[]): CliState {
         state.confidentialDecryptionKey = next;
         i += 1;
         break;
+      case "--confidential-new-decryption-key":
+        state.confidentialNewDecryptionKey = next;
+        i += 1;
+        break;
       case "--confidential-amount":
         state.confidentialAmount = next;
         i += 1;
@@ -386,7 +414,7 @@ function parseArgList(argv: string[]): CliState {
         state.quiet = true;
         break;
       case "--help":
-        fail("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]");
+        printUsage();
       default:
         fail(`unknown argument: ${arg}`);
     }
@@ -534,7 +562,8 @@ function requireValidState(state: CliState, spec: InputSpec): void {
       spec.confidential_action !== "withdraw" &&
       spec.confidential_action !== "transfer" &&
       spec.confidential_action !== "rollover" &&
-      spec.confidential_action !== "normalize"
+      spec.confidential_action !== "normalize" &&
+      spec.confidential_action !== "rotate"
     ) {
       fail(`unsupported confidential-asset action: ${spec.confidential_action}`);
     }
@@ -543,10 +572,14 @@ function requireValidState(state: CliState, spec: InputSpec): void {
       (spec.confidential_action === "register" ||
         spec.confidential_action === "withdraw" ||
         spec.confidential_action === "transfer" ||
-        spec.confidential_action === "normalize") &&
+        spec.confidential_action === "normalize" ||
+        spec.confidential_action === "rotate") &&
       !spec.confidential_decryption_key
     ) {
       fail(`confidential-asset ${spec.confidential_action} requires --confidential-decryption-key`);
+    }
+    if (spec.confidential_action === "rotate" && !spec.confidential_new_decryption_key) {
+      fail("confidential-asset rotate requires --confidential-new-decryption-key");
     }
     if (
       (spec.confidential_action === "deposit" ||
@@ -975,6 +1008,21 @@ async function buildConfidentialAssetTransaction(
       return builder.normalizeBalance({
         sender,
         senderDecryptionKey: decryptionKey,
+        tokenAddress,
+        options,
+      });
+    }
+    case "rotate": {
+      const decryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_decryption_key, "--confidential-decryption-key"),
+      );
+      const newDecryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_new_decryption_key, "--confidential-new-decryption-key"),
+      );
+      return builder.rotateEncryptionKey({
+        sender,
+        senderDecryptionKey: decryptionKey,
+        newSenderDecryptionKey: newDecryptionKey,
         tokenAddress,
         options,
       });
@@ -1655,6 +1703,9 @@ async function main(): Promise<void> {
     confidential_decryption_key:
       state.confidentialDecryptionKey ??
       (fileInput.confidential_decryption_key ? String(fileInput.confidential_decryption_key) : undefined),
+    confidential_new_decryption_key:
+      state.confidentialNewDecryptionKey ??
+      (fileInput.confidential_new_decryption_key ? String(fileInput.confidential_new_decryption_key) : undefined),
     confidential_amount:
       state.confidentialAmount ?? (fileInput.confidential_amount !== undefined ? String(fileInput.confidential_amount) : undefined),
     confidential_recipient: state.confidentialRecipient

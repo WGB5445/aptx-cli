@@ -16,6 +16,17 @@ pnpm start:bun -- inspect --network testnet
 pnpm start:deno -- inspect --network testnet
 ```
 
+Also installable as a standalone `aptx` executable (`bin/aptx`, a `node --experimental-strip-types`
+wrapper — see `package.json`'s `bin` field):
+
+```bash
+npm link
+aptx inspect --network testnet
+```
+
+`aptx --help` (or `aptx <action> <txn-type> --help`) prints the full flag reference, including
+`confidential-asset`'s `--confidential-*` flags.
+
 ## Real Coverage
 
 Implemented real SDK-backed flows:
