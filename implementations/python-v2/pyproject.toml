@@ -8,7 +8,18 @@ version = "0.1.0"
 description = "Python v2 implementation of the aptx CLI targeting aptos-sdk-v2"
 requires-python = ">=3.12"
 dependencies = [
-    "aptos-sdk-v2",
+    # Despite the package name, encode/decode/sign (aptx_py_v2/cli.py) use v1's BCS/ed25519 types,
+    # same as implementations/python does -- see that module's "Offline ops use aptos_sdk v1 BCS".
+    "aptos-sdk>=0.11.0",
+]
+
+[project.optional-dependencies]
+# aptos-sdk-v2 isn't published to PyPI (it's an in-development SDK living in a subdirectory of
+# aptos-labs/aptos-python-sdk's `v2` branch layout) -- install this extra only if you need real
+# --sdk-mode sdk network calls. Mock mode and encode/decode/sign never import aptos_sdk_v2 (see
+# aptx_py_v2/sdk.py's lazy, try/except-guarded import), so it's optional.
+sdk = [
+    "aptos-sdk-v2 @ git+https://github.com/aptos-labs/aptos-python-sdk.git@main#subdirectory=v2",
 ]
 
 [tool.setuptools]
