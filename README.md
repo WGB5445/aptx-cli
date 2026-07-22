@@ -130,9 +130,9 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 
 | Implementation | SDK | Offline (encode/decode/sign) | Simulate coverage |
 |---|---|---|---|
-| TypeScript | `@aptos-labs/ts-sdk` ^7.2.0 | ✅ | single, multi-agent, multi-key, multi-sig, confidential-asset (TS-only, see [`spec/confidential-asset.md`](spec/confidential-asset.md)) |
+| TypeScript | `@aptos-labs/ts-sdk` ^7.2.0 | ✅ | single, multi-agent, multi-key, multi-sig, confidential-asset (see [`spec/confidential-asset.md`](spec/confidential-asset.md)) |
 | Go (v1) | `aptos-go-sdk` v1.13.0 | ✅ | single, multi-agent, multi-sig (multi-key pending) |
-| Go (v2) | `aptos-go-sdk/v2` v2.0.0-dev | ✅ | single, multi-agent (localnet tests pending) |
+| Go (v2) | `aptos-go-sdk/v2` v2.0.0-dev | ✅ | single, multi-agent, confidential-asset (experimental, local-only — see [`implementations/go-v2/README.md`](implementations/go-v2/README.md#confidential-asset-experimental-local-only-for-now); localnet tests for single/multi-agent pending) |
 | Python (v1) | `aptos-sdk` >=0.11.0 | ✅ | mock only (no orderless support) |
 | Python (v2) | `aptos-sdk-v2` | ✅ | mock only (localnet tests pending) |
 | Rust | `aptos-sdk` 0.5.0 | ✅ | mock only |
@@ -145,7 +145,7 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 - `multi-agent` supports both entry-function (`--function`) and script payload (`--script-hex`)
 - `multi-sig` uses `--multisig-action`: `create-account`, `propose`, `approve`, `execute`
 - `multi-key` uses `--multi-key-public-key`, `--multi-key-threshold`, `--multi-key-signer <index>:<key>`
-- `confidential-asset` (TypeScript-only, not part of the cross-language conformance contract) uses `--confidential-action`: `register`, `deposit`, `withdraw`, `transfer`, `rollover`, `normalize` — see [`spec/confidential-asset.md`](spec/confidential-asset.md)
+- `confidential-asset` (TS + Go v2, not part of the cross-language conformance contract — see [`spec/confidential-asset.md`](spec/confidential-asset.md)) uses `--confidential-action`: `register`, `deposit`, `withdraw`, `transfer`, `rollover`, `normalize`. Cross-SDK verification (TS ↔ Go, each independently decrypting the other's writes) is [`tests/live_confidential_asset_interop.py`](tests/live_confidential_asset_interop.py) — currently run manually, not yet in CI, since Go's confidential-asset support depends on an unmerged upstream `aptos-go-sdk` branch
 
 ## Validation
 
@@ -158,3 +158,5 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 - TypeScript localnet confidential-asset flow: [`implementations/typescript/scripts/live-confidential-asset.ts`](implementations/typescript/scripts/live-confidential-asset.ts)
 - Go CLI localnet multisig flow: [`implementations/go/integration/cli_multisig_test.go`](implementations/go/integration/cli_multisig_test.go)
 - Go SDK localnet multisig flow: [`implementations/go/integration/multisig_test.go`](implementations/go/integration/multisig_test.go)
+- Cross-SDK confidential-asset interop (TS ↔ Go v2, manual): [`tests/live_confidential_asset_interop.py`](tests/live_confidential_asset_interop.py)
+- Go v2 confidential-asset balance check helper: [`implementations/go-v2/scripts/get-confidential-balance`](implementations/go-v2/scripts/get-confidential-balance)
