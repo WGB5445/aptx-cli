@@ -4,6 +4,9 @@
   "type": "module",
   "packageManager": "pnpm@10.30.3",
   "description": "TypeScript implementation of the Aptos transaction CLI targeting @aptos-labs/ts-sdk",
+  "bin": {
+    "aptx": "bin/aptx"
+  },
   "scripts": {
     "start": "node --experimental-strip-types src/cli.ts",
     "start:bun": "bun src/cli.ts",
@@ -11,10 +14,12 @@
     "test:keyless-bcs": "node --experimental-strip-types scripts/test-keyless-bcs.ts",
     "test:multikey": "node --experimental-strip-types scripts/live-multikey.ts",
     "test:multisig": "node --experimental-strip-types scripts/live-multisig.ts",
+    "test:confidential-asset": "node --experimental-strip-types scripts/live-confidential-asset.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aptos-labs/ts-sdk": "^7.1.0",
+    "@aptos-labs/confidential-asset": "^2.2.0",
+    "@aptos-labs/ts-sdk": "^7.2.0",
     "@noble/hashes": "^1.8.0"
   },
   "devDependencies": {

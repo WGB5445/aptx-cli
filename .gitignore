@@ -6,11 +6,13 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.egg-info/
 .DS_Store
 node_modules/
 .pnpm-store/
 implementations/python/.venv_pkgs/
 bin/
+!implementations/typescript/bin/
 target/
 implementations/go/aptx
 implementations/go-v2/aptx

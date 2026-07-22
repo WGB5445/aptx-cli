@@ -5,13 +5,22 @@ Python implementation of the aptx CLI targeting `aptos-sdk-v2`.
 ## Requirements
 
 - Python 3.12+
-- `aptos-sdk-v2` (install via `pip install -e .`)
+- `aptos-sdk` (v1, used for offline `encode`/`decode`/`sign` BCS — installed automatically)
+- `aptos-sdk-v2` (only for real `--sdk-mode sdk` network calls — optional, see below)
 
 ## Installation
 
 ```bash
 cd implementations/python-v2
 pip install -e .
+```
+
+`aptos-sdk-v2` isn't published to PyPI (it lives in the `v2` subdirectory of
+`aptos-labs/aptos-python-sdk`), so it's an optional extra rather than a hard dependency — mock mode
+and encode/decode/sign don't need it. To install it for real SDK network calls:
+
+```bash
+pip install -e ".[sdk]"
 ```
 
 ## Running

@@ -12,6 +12,7 @@ import {
   FixedBytes,
   MultiKey,
   MultiKeyAccount,
+  MultiAgentTransaction,
   MoveString,
   MoveVector,
   MultiSig,
@@ -20,6 +21,7 @@ import {
   type PublicKey,
   Script,
   Serialized,
+  SimpleTransaction,
   TransactionPayloadEntryFunction,
   TransactionPayloadMultiSig,
   TransactionPayloadScript,
@@ -34,11 +36,13 @@ import {
   Deserializer,
 } from "@aptos-labs/ts-sdk";
 import type { EntryFunctionArgument } from "@aptos-labs/ts-sdk";
+import { ConfidentialAssetTransactionBuilder, TwistedEd25519PrivateKey } from "@aptos-labs/confidential-asset";
 
 type Action = "simulate" | "submit" | "run" | "inspect" | "encode" | "decode" | "sign";
-type TxnType = "single" | "multi-agent" | "multi-key" | "multi-sig";
+type TxnType = "single" | "multi-agent" | "multi-key" | "multi-sig" | "confidential-asset";
 type OutputFormat = "json" | "yaml" | "table" | "ascii";
 type MultisigAction = "create-account" | "propose" | "approve" | "execute";
+type ConfidentialAssetAction = "register" | "deposit" | "withdraw" | "transfer" | "rollover" | "normalize" | "rotate";
 
 type ParsedArg = { mode: "parsed"; raw: string; argType: string; value: string };
 type RawArg = { mode: "raw"; raw: string; hex: string };
@@ -66,6 +70,14 @@ type InputSpec = {
   multi_key_public_keys: string[];
   multi_key_signers: string[];
   multi_key_threshold?: number;
+  confidential_action?: ConfidentialAssetAction;
+  confidential_token_address?: string;
+  confidential_decryption_key?: string;
+  confidential_new_decryption_key?: string;
+  confidential_amount?: string;
+  confidential_recipient?: string;
+  confidential_with_pause_incoming: boolean;
+  confidential_memo?: string;
 };
 
 type CliState = {
@@ -103,6 +115,14 @@ type CliState = {
   multiKeyPublicKeys: string[];
   multiKeySigners: string[];
   multiKeyThreshold?: number;
+  confidentialAction?: ConfidentialAssetAction;
+  confidentialTokenAddress?: string;
+  confidentialDecryptionKey?: string;
+  confidentialNewDecryptionKey?: string;
+  confidentialAmount?: string;
+  confidentialRecipient?: string;
+  confidentialWithPauseIncoming: boolean;
+  confidentialMemo?: string;
   noSign: boolean;
   abiEnabled: boolean;
   verbose: boolean;
@@ -131,12 +151,34 @@ function fail(message: string): never {
   process.exit(2);
 }
 
+const USAGE = `usage: aptx <simulate|submit|run|inspect|encode|decode|sign> <txn-type> [flags]
+
+txn-types: single, multi-agent, multi-key, multi-sig, confidential-asset
+
+confidential-asset flags (see spec/confidential-asset.md for the full contract):
+  --confidential-action <register|deposit|withdraw|transfer|rollover|normalize|rotate>
+  --confidential-token-address <address>
+  --confidential-decryption-key <hex>          (register, withdraw, transfer, normalize, rotate)
+  --confidential-new-decryption-key <hex>      (rotate)
+  --confidential-amount <u64>                  (deposit, withdraw, transfer)
+  --confidential-recipient <address>           (transfer required; withdraw optional)
+  --confidential-with-pause-incoming           (rollover; required before rotate)
+  --confidential-memo <hex>                    (transfer, optional)
+
+example: aptx run confidential-asset --network local --sender-address 0x.. --private-key 0x.. \\
+  --confidential-action deposit --confidential-token-address 0xa --confidential-amount 1000`;
+
+function printUsage(): never {
+  console.error(USAGE);
+  process.exit(2);
+}
+
 function parseArgList(argv: string[]): CliState {
   if (argv[0] === "--") {
     argv = argv.slice(1);
   }
   if (argv.length < 1) {
-    fail("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]");
+    printUsage();
   }
   const action = argv[0] as Action;
   const txnType = (action === "inspect" || action === "decode" || action === "sign" ? "single" : argv[1]) as TxnType;
@@ -153,6 +195,7 @@ function parseArgList(argv: string[]): CliState {
     multisigHashOnly: false,
     multiKeyPublicKeys: [],
     multiKeySigners: [],
+    confidentialWithPauseIncoming: false,
     noSign: false,
     abiEnabled: true,
     verbose: false,
@@ -291,6 +334,37 @@ function parseArgList(argv: string[]): CliState {
         state.multiKeyThreshold = Number(next);
         i += 1;
         break;
+      case "--confidential-action":
+        state.confidentialAction = next as ConfidentialAssetAction;
+        i += 1;
+        break;
+      case "--confidential-token-address":
+        state.confidentialTokenAddress = next;
+        i += 1;
+        break;
+      case "--confidential-decryption-key":
+        state.confidentialDecryptionKey = next;
+        i += 1;
+        break;
+      case "--confidential-new-decryption-key":
+        state.confidentialNewDecryptionKey = next;
+        i += 1;
+        break;
+      case "--confidential-amount":
+        state.confidentialAmount = next;
+        i += 1;
+        break;
+      case "--confidential-recipient":
+        state.confidentialRecipient = next;
+        i += 1;
+        break;
+      case "--confidential-with-pause-incoming":
+        state.confidentialWithPauseIncoming = true;
+        break;
+      case "--confidential-memo":
+        state.confidentialMemo = next;
+        i += 1;
+        break;
       case "--sdk-mode":
         state.sdkMode = (next as "mock" | "sdk") || "sdk";
         i += 1;
@@ -340,7 +414,7 @@ function parseArgList(argv: string[]): CliState {
         state.quiet = true;
         break;
       case "--help":
-        fail("usage: aptx <simulate|submit|run|inspect> <txn-type> [flags]");
+        printUsage();
       default:
         fail(`unknown argument: ${arg}`);
     }
@@ -477,10 +551,57 @@ function requireValidState(state: CliState, spec: InputSpec): void {
     if ((state.action === "submit" || (state.action === "run" && !spec.no_sign)) && spec.multi_key_signers.length !== spec.multi_key_threshold) {
       fail("multi-key submit requires exactly threshold many --multi-key-signer values");
     }
+  } else if (state.txnType === "confidential-asset") {
+    if (spec.function || spec.script_hex || spec.args.length > 0 || spec.type_args.length > 0) {
+      fail("confidential-asset does not accept --function, --script-hex, --arg, or --type-arg");
+    }
+    if (!spec.confidential_action) fail("confidential-asset requires --confidential-action");
+    if (
+      spec.confidential_action !== "register" &&
+      spec.confidential_action !== "deposit" &&
+      spec.confidential_action !== "withdraw" &&
+      spec.confidential_action !== "transfer" &&
+      spec.confidential_action !== "rollover" &&
+      spec.confidential_action !== "normalize" &&
+      spec.confidential_action !== "rotate"
+    ) {
+      fail(`unsupported confidential-asset action: ${spec.confidential_action}`);
+    }
+    if (!spec.confidential_token_address) fail("confidential-asset requires --confidential-token-address");
+    if (
+      (spec.confidential_action === "register" ||
+        spec.confidential_action === "withdraw" ||
+        spec.confidential_action === "transfer" ||
+        spec.confidential_action === "normalize" ||
+        spec.confidential_action === "rotate") &&
+      !spec.confidential_decryption_key
+    ) {
+      fail(`confidential-asset ${spec.confidential_action} requires --confidential-decryption-key`);
+    }
+    if (spec.confidential_action === "rotate" && !spec.confidential_new_decryption_key) {
+      fail("confidential-asset rotate requires --confidential-new-decryption-key");
+    }
+    if (
+      (spec.confidential_action === "deposit" ||
+        spec.confidential_action === "withdraw" ||
+        spec.confidential_action === "transfer") &&
+      !spec.confidential_amount
+    ) {
+      fail(`confidential-asset ${spec.confidential_action} requires --confidential-amount`);
+    }
+    if (spec.confidential_action === "transfer" && !spec.confidential_recipient) {
+      fail("confidential-asset transfer requires --confidential-recipient");
+    }
   } else {
     if (!spec.function && !spec.script_hex) fail("missing function or --script-hex");
   }
-  if (state.txnType !== "single" && state.txnType !== "multi-agent" && state.txnType !== "multi-sig" && state.txnType !== "multi-key") {
+  if (
+    state.txnType !== "single" &&
+    state.txnType !== "multi-agent" &&
+    state.txnType !== "multi-sig" &&
+    state.txnType !== "multi-key" &&
+    state.txnType !== "confidential-asset"
+  ) {
     fail(`${state.txnType} is not implemented yet in the real TypeScript backend`);
   }
   if (state.txnType === "multi-agent" && spec.secondary_signer_addresses.length === 0) {
@@ -521,6 +642,11 @@ function buildStableSeed(action: string, txnType: string, spec: InputSpec, signM
     spec.multi_key_public_keys.join(","),
     spec.multi_key_signers.join(","),
     String(spec.multi_key_threshold ?? ""),
+    spec.confidential_action ?? "",
+    spec.confidential_token_address ?? "",
+    spec.confidential_amount ?? "",
+    spec.confidential_recipient ?? "",
+    String(spec.confidential_with_pause_incoming),
     String(spec.abi_enabled),
     signMode,
   ].join("|");
@@ -580,11 +706,13 @@ function renderTable(payload: Record<string, unknown>): string {
   const input = payload.input as Record<string, unknown>;
   const target = input.multisig_action
     ? `multisig:${String(input.multisig_action)}`
-    : input.function
-      ? String(input.function)
-      : input.script_hex
-        ? `script:${String(input.script_hex).slice(0, 18)}...`
-        : "-";
+    : input.confidential_action
+      ? `confidential:${String(input.confidential_action)}`
+      : input.function
+        ? String(input.function)
+        : input.script_hex
+          ? `script:${String(input.script_hex).slice(0, 18)}...`
+          : "-";
   const rows: Array<[string, string]> = [
     ["implementation", String(payload.implementation)],
     ["sdk_backend", String(payload.sdk_backend)],
@@ -604,11 +732,13 @@ function renderAscii(payload: Record<string, unknown>): string {
   const input = payload.input as Record<string, unknown>;
   const target = input.multisig_action
     ? `multisig:${String(input.multisig_action)}`
-    : input.function
-      ? String(input.function)
-      : input.script_hex
-        ? `script:${String(input.script_hex).slice(0, 18)}...`
-        : "-";
+    : input.confidential_action
+      ? `confidential:${String(input.confidential_action)}`
+      : input.function
+        ? String(input.function)
+        : input.script_hex
+          ? `script:${String(input.script_hex).slice(0, 18)}...`
+          : "-";
   const lines = [
     "+----------------------------------------------+",
     "| Aptos Transaction CLI                        |",
@@ -805,6 +935,100 @@ async function buildMultisigPayload(
     }
     default:
       fail(`unsupported multi-sig action: ${spec.multisig_action}`);
+  }
+}
+
+function must<T>(value: T | undefined, flagName: string): T {
+  if (value === undefined) {
+    fail(`confidential-asset requires ${flagName}`);
+  }
+  return value;
+}
+
+async function buildConfidentialAssetTransaction(
+  aptos: Aptos,
+  spec: InputSpec,
+  options: { maxGasAmount: number; gasUnitPrice?: number },
+): Promise<SimpleTransaction> {
+  const builder = new ConfidentialAssetTransactionBuilder(aptos.config);
+  const sender = spec.sender_address;
+  const tokenAddress = must(spec.confidential_token_address, "--confidential-token-address");
+  switch (spec.confidential_action) {
+    case "register": {
+      const decryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_decryption_key, "--confidential-decryption-key"),
+      );
+      return builder.registerBalance({ sender, tokenAddress, decryptionKey, options });
+    }
+    case "deposit": {
+      const amount = BigInt(must(spec.confidential_amount, "--confidential-amount"));
+      return builder.deposit({ sender, tokenAddress, amount, options });
+    }
+    case "withdraw": {
+      const decryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_decryption_key, "--confidential-decryption-key"),
+      );
+      const amount = BigInt(must(spec.confidential_amount, "--confidential-amount"));
+      return builder.withdraw({
+        sender,
+        senderDecryptionKey: decryptionKey,
+        tokenAddress,
+        amount,
+        recipient: spec.confidential_recipient,
+        options,
+      });
+    }
+    case "transfer": {
+      const decryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_decryption_key, "--confidential-decryption-key"),
+      );
+      const amount = BigInt(must(spec.confidential_amount, "--confidential-amount"));
+      const recipient = must(spec.confidential_recipient, "--confidential-recipient");
+      return builder.transfer({
+        sender,
+        recipient,
+        tokenAddress,
+        amount,
+        senderDecryptionKey: decryptionKey,
+        memo: spec.confidential_memo ? decodeHex(spec.confidential_memo) : undefined,
+        options,
+      });
+    }
+    case "rollover":
+      return builder.rolloverPendingBalance({
+        sender,
+        tokenAddress,
+        withPauseIncoming: spec.confidential_with_pause_incoming,
+        options,
+      });
+    case "normalize": {
+      const decryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_decryption_key, "--confidential-decryption-key"),
+      );
+      return builder.normalizeBalance({
+        sender,
+        senderDecryptionKey: decryptionKey,
+        tokenAddress,
+        options,
+      });
+    }
+    case "rotate": {
+      const decryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_decryption_key, "--confidential-decryption-key"),
+      );
+      const newDecryptionKey = new TwistedEd25519PrivateKey(
+        must(spec.confidential_new_decryption_key, "--confidential-new-decryption-key"),
+      );
+      return builder.rotateEncryptionKey({
+        sender,
+        senderDecryptionKey: decryptionKey,
+        newSenderDecryptionKey: newDecryptionKey,
+        tokenAddress,
+        options,
+      });
+    }
+    default:
+      fail(`unsupported confidential-asset action: ${spec.confidential_action}`);
   }
 }
 
@@ -1024,6 +1248,12 @@ async function runMock(state: CliState, spec: InputSpec): Promise<Record<string,
       multi_key_public_keys: spec.multi_key_public_keys,
       multi_key_signers: spec.multi_key_signers,
       multi_key_threshold: spec.multi_key_threshold,
+      confidential_action: spec.confidential_action,
+      confidential_token_address: spec.confidential_token_address,
+      confidential_amount: spec.confidential_amount,
+      confidential_recipient: spec.confidential_recipient,
+      confidential_with_pause_incoming: spec.confidential_with_pause_incoming,
+      confidential_memo: spec.confidential_memo,
       hash: spec.hash,
       fullnode: spec.fullnode,
     },
@@ -1121,32 +1351,45 @@ async function runReal(state: CliState, spec: InputSpec): Promise<Record<string,
     secondarySigners,
     spec.secondary_signer_addresses,
   );
-  const abi = await resolveAbiSummary(aptos, spec);
-  const parsedArgs = spec.args.map(parseArg);
-  const typeArgs = spec.type_args.map((value) => parseTypeTag(value));
-  const payloadPlan =
-    state.txnType === "multi-sig"
-      ? await buildMultisigPayload(aptos, spec, parsedArgs, typeArgs)
-      : { payload: buildSimplePayload(spec, parsedArgs, typeArgs) };
-  const payloadInstance = payloadPlan.payload;
   const txnOptions = {
     maxGasAmount: state.maxGasAmount ?? 200_000,
     ...(state.gasUnitPrice != null ? { gasUnitPrice: state.gasUnitPrice } : {}),
   };
-  const transaction = await (state.txnType === "multi-agent"
-    ? buildTransaction({
-        aptosConfig: aptos.config,
-        sender: spec.sender_address,
-        payload: payloadInstance,
-        options: txnOptions,
-        secondarySignerAddresses: spec.secondary_signer_addresses,
-      })
-    : buildTransaction({
-        aptosConfig: aptos.config,
-        sender: spec.sender_address,
-        payload: payloadInstance,
-        options: txnOptions,
-      }));
+
+  let abi: AbiSummary;
+  let parsedArgs: ArgSpec[] = [];
+  let typeArgs: ReturnType<typeof parseTypeTag>[] = [];
+  let payloadPlan: { expectedMultisigAddress?: string } = {};
+  let transaction: SimpleTransaction | MultiAgentTransaction;
+
+  if (state.txnType === "confidential-asset") {
+    abi = { fetched: false };
+    transaction = await buildConfidentialAssetTransaction(aptos, spec, txnOptions);
+  } else {
+    abi = await resolveAbiSummary(aptos, spec);
+    parsedArgs = spec.args.map(parseArg);
+    typeArgs = spec.type_args.map((value) => parseTypeTag(value));
+    const builtPayloadPlan =
+      state.txnType === "multi-sig"
+        ? await buildMultisigPayload(aptos, spec, parsedArgs, typeArgs)
+        : { payload: buildSimplePayload(spec, parsedArgs, typeArgs) };
+    payloadPlan = builtPayloadPlan;
+    const payloadInstance = builtPayloadPlan.payload;
+    transaction = await (state.txnType === "multi-agent"
+      ? buildTransaction({
+          aptosConfig: aptos.config,
+          sender: spec.sender_address,
+          payload: payloadInstance,
+          options: txnOptions,
+          secondarySignerAddresses: spec.secondary_signer_addresses,
+        })
+      : buildTransaction({
+          aptosConfig: aptos.config,
+          sender: spec.sender_address,
+          payload: payloadInstance,
+          options: txnOptions,
+        }));
+  }
 
   const payload: Record<string, unknown> = {
     cli: "aptx",
@@ -1171,6 +1414,12 @@ async function runReal(state: CliState, spec: InputSpec): Promise<Record<string,
       multisig_threshold: spec.multisig_threshold,
       multisig_sequence: spec.multisig_sequence,
       multisig_hash_only: spec.multisig_hash_only,
+      confidential_action: spec.confidential_action,
+      confidential_token_address: spec.confidential_token_address,
+      confidential_amount: spec.confidential_amount,
+      confidential_recipient: spec.confidential_recipient,
+      confidential_with_pause_incoming: spec.confidential_with_pause_incoming,
+      confidential_memo: spec.confidential_memo,
       fullnode: spec.fullnode,
     },
     signing: {
@@ -1445,6 +1694,26 @@ async function main(): Promise<void> {
         : ((fileInput.multi_key_signers as string[]) ?? []),
     multi_key_threshold:
       state.multiKeyThreshold ?? (fileInput.multi_key_threshold !== undefined ? Number(fileInput.multi_key_threshold) : undefined),
+    confidential_action: state.confidentialAction ?? (fileInput.confidential_action as ConfidentialAssetAction | undefined),
+    confidential_token_address: state.confidentialTokenAddress
+      ? normalizeAddressInput(state.confidentialTokenAddress)
+      : (fileInput.confidential_token_address
+          ? normalizeAddressInput(String(fileInput.confidential_token_address))
+          : undefined),
+    confidential_decryption_key:
+      state.confidentialDecryptionKey ??
+      (fileInput.confidential_decryption_key ? String(fileInput.confidential_decryption_key) : undefined),
+    confidential_new_decryption_key:
+      state.confidentialNewDecryptionKey ??
+      (fileInput.confidential_new_decryption_key ? String(fileInput.confidential_new_decryption_key) : undefined),
+    confidential_amount:
+      state.confidentialAmount ?? (fileInput.confidential_amount !== undefined ? String(fileInput.confidential_amount) : undefined),
+    confidential_recipient: state.confidentialRecipient
+      ? normalizeAddressInput(state.confidentialRecipient)
+      : (fileInput.confidential_recipient ? normalizeAddressInput(String(fileInput.confidential_recipient)) : undefined),
+    confidential_with_pause_incoming: state.confidentialWithPauseIncoming || fileInput.confidential_with_pause_incoming === true,
+    confidential_memo:
+      state.confidentialMemo ?? (fileInput.confidential_memo ? String(fileInput.confidential_memo) : undefined),
   };
   if (state.txnType === "multi-key" && !senderAddressInput && spec.multi_key_public_keys.length > 0 && spec.multi_key_threshold) {
     spec.sender_address = buildMultiKeyPublicKey(spec).authKey().derivedAddress().toString();

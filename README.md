@@ -130,7 +130,7 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 
 | Implementation | SDK | Offline (encode/decode/sign) | Simulate coverage |
 |---|---|---|---|
-| TypeScript | `@aptos-labs/ts-sdk` ^7.1.0 | ✅ | single, multi-agent, multi-key, multi-sig |
+| TypeScript | `@aptos-labs/ts-sdk` ^7.2.0 | ✅ | single, multi-agent, multi-key, multi-sig, confidential-asset (TS-only, see [`spec/confidential-asset.md`](spec/confidential-asset.md)) |
 | Go (v1) | `aptos-go-sdk` v1.13.0 | ✅ | single, multi-agent, multi-sig (multi-key pending) |
 | Go (v2) | `aptos-go-sdk/v2` v2.0.0-dev | ✅ | single, multi-agent (localnet tests pending) |
 | Python (v1) | `aptos-sdk` >=0.11.0 | ✅ | mock only (no orderless support) |
@@ -145,6 +145,7 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 - `multi-agent` supports both entry-function (`--function`) and script payload (`--script-hex`)
 - `multi-sig` uses `--multisig-action`: `create-account`, `propose`, `approve`, `execute`
 - `multi-key` uses `--multi-key-public-key`, `--multi-key-threshold`, `--multi-key-signer <index>:<key>`
+- `confidential-asset` (TypeScript-only, not part of the cross-language conformance contract) uses `--confidential-action`: `register`, `deposit`, `withdraw`, `transfer`, `rollover`, `normalize` — see [`spec/confidential-asset.md`](spec/confidential-asset.md)
 
 ## Validation
 
@@ -154,5 +155,6 @@ No Python code changes required. See [`conformance/README.md`](conformance/READM
 - shared real multi-agent helper: [`tests/live_multi_agent.py`](tests/live_multi_agent.py)
 - TypeScript localnet multikey flow: [`implementations/typescript/scripts/live-multikey.ts`](implementations/typescript/scripts/live-multikey.ts)
 - TypeScript localnet multisig flow: [`implementations/typescript/scripts/live-multisig.ts`](implementations/typescript/scripts/live-multisig.ts)
+- TypeScript localnet confidential-asset flow: [`implementations/typescript/scripts/live-confidential-asset.ts`](implementations/typescript/scripts/live-confidential-asset.ts)
 - Go CLI localnet multisig flow: [`implementations/go/integration/cli_multisig_test.go`](implementations/go/integration/cli_multisig_test.go)
 - Go SDK localnet multisig flow: [`implementations/go/integration/multisig_test.go`](implementations/go/integration/multisig_test.go)

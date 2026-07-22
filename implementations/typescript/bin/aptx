@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+# Resolve symlinks (pnpm/npm install this as a symlink into node_modules/.bin or a global bin dir)
+# so the relative path to src/cli.ts below works regardless of how this script is invoked.
+SCRIPT_PATH="$0"
+while [ -L "$SCRIPT_PATH" ]; do
+  LINK="$(readlink "$SCRIPT_PATH")"
+  case "$LINK" in
+    /*) SCRIPT_PATH="$LINK" ;;
+    *) SCRIPT_PATH="$(dirname "$SCRIPT_PATH")/$LINK" ;;
+  esac
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+exec node --experimental-strip-types "$SCRIPT_DIR/../src/cli.ts" "$@"
